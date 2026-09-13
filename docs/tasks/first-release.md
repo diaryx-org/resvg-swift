@@ -11,9 +11,8 @@ part_of: '[Tasks](tasks.md)'
 
 What stands between this checkout and a `0.1.0` that leaf can pin:
 
-- The GitHub repository `diaryx-org/resvg-swift`, and this checkout pushed to
-  it. Listed in `~/diaryx/repos.figl` already; `dx clone --check` reports it
-  missing until it exists.
+- ~~The GitHub repository `diaryx-org/resvg-swift`~~ — created 2026-09-12;
+  this checkout pushed to it.
 - The `CARGO_REGISTRY_TOKEN` secret on the repo, with `publish-new` scope —
   both crates are new to crates.io. `publish.yml` names it.
 - The version. `dx release` with no spec proposes; the number is Adam's.

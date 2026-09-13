@@ -3,7 +3,7 @@ resolver = "3"
 # Listed rather than globbed: `xtask` reads this line to know what CI covers.
 members = [
   "crates/usvg-flatten",
-  "crates/resvg-swift",
+  "crates/resvg-uniffi",
   "xtask",
 ]
 

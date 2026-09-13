@@ -4,7 +4,7 @@ name: Publish
 #
 # Which crates go up and in what order is `cargo publish --workspace`, which
 # reads both off the manifests — `publish = false` members (xtask) are skipped,
-# and uploads are ordered so `usvg-flatten` precedes `resvg-swift`, which
+# and uploads are ordered so `usvg-flatten` precedes `resvg-uniffi`, which
 # depends on it. A run that died partway is finished by naming what already
 # went up:
 #

@@ -1,4 +1,4 @@
-module resvg_swiftFFI {
-    header "resvg_swiftFFI.h"
+module resvg_uniffiFFI {
+    header "resvg_uniffiFFI.h"
     export *
 }

@@ -1,12 +1,12 @@
 [package]
-name = "resvg-swift"
+name = "resvg-uniffi"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
-description = "UniFFI binding over usvg-flatten: parses an SVG with usvg and hands Swift a vector display list to replay into a CGContext. The Rust half of the resvg-swift package; a host links it into its one Rust staticlib."
+description = "UniFFI binding over usvg-flatten: parses an SVG with usvg and hands Swift a vector display list to replay into a CGContext. The binding crate of the resvg-swift repository; a host links it into its one Rust staticlib. UniFFI, so Kotlin and Python bindings are a generator run away."
 keywords = ["svg", "resvg", "swift", "uniffi", "coregraphics"]
 categories = ["rendering", "external-ffi-bindings"]
 
@@ -19,7 +19,7 @@ categories = ["rendering", "external-ffi-bindings"]
 crate-type = ["staticlib", "cdylib", "lib"]
 
 # The bindings generator. `scripts/gen-bindings.sh` runs it as
-#   cargo run -p resvg-swift --bin uniffi-bindgen -- generate --library …
+#   cargo run -p resvg-uniffi --bin uniffi-bindgen -- generate --library …
 # Kept in-tree so the generator version can never drift from the `uniffi`
 # runtime this crate links.
 [[bin]]

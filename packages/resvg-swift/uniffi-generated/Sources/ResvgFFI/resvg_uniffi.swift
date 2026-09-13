@@ -7,8 +7,8 @@ import Foundation
 // Depending on the consumer's build setup, the low-level FFI code
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
-#if canImport(resvg_swiftFFI)
-import resvg_swiftFFI
+#if canImport(resvg_uniffiFFI)
+import resvg_uniffiFFI
 #endif
 
 fileprivate extension RustBuffer {
@@ -25,13 +25,13 @@ fileprivate extension RustBuffer {
     }
 
     static func from(_ ptr: UnsafeBufferPointer<UInt8>) -> RustBuffer {
-        try! rustCall { ffi_resvg_swift_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
+        try! rustCall { ffi_resvg_uniffi_rustbuffer_from_bytes(ForeignBytes(bufferPointer: ptr), $0) }
     }
 
     // Frees the buffer in place.
     // The buffer must not be used after this is called.
     func deallocate() {
-        try! rustCall { ffi_resvg_swift_rustbuffer_free(self, $0) }
+        try! rustCall { ffi_resvg_uniffi_rustbuffer_free(self, $0) }
     }
 }
 
@@ -603,7 +603,7 @@ open class SvgDocument:
     @_documentation(visibility: private)
 #endif
     public func uniffiClonePointer() -> UnsafeMutableRawPointer {
-        return try! rustCall { uniffi_resvg_swift_fn_clone_svgdocument(self.pointer, $0) }
+        return try! rustCall { uniffi_resvg_uniffi_fn_clone_svgdocument(self.pointer, $0) }
     }
     /**
      * Parse `data` — plain or gzip-compressed SVG.
@@ -611,7 +611,7 @@ open class SvgDocument:
 public convenience init(data: Data, options: ParseOptions)throws  {
     let pointer =
         try rustCallWithError(FfiConverterTypeSvgError.lift) {
-    uniffi_resvg_swift_fn_constructor_svgdocument_new(
+    uniffi_resvg_uniffi_fn_constructor_svgdocument_new(
         FfiConverterData.lower(data),
         FfiConverterTypeParseOptions.lower(options),$0
     )
@@ -624,7 +624,7 @@ public convenience init(data: Data, options: ParseOptions)throws  {
             return
         }
 
-        try! rustCall { uniffi_resvg_swift_fn_free_svgdocument(pointer, $0) }
+        try! rustCall { uniffi_resvg_uniffi_fn_free_svgdocument(pointer, $0) }
     }
 
     
@@ -640,7 +640,7 @@ public convenience init(data: Data, options: ParseOptions)throws  {
      */
 open func displayList(rasterScale: Float) -> DisplayList {
     return try!  FfiConverterTypeDisplayList.lift(try! rustCall() {
-    uniffi_resvg_swift_fn_method_svgdocument_display_list(self.uniffiClonePointer(),
+    uniffi_resvg_uniffi_fn_method_svgdocument_display_list(self.uniffiClonePointer(),
         FfiConverterFloat.lower(rasterScale),$0
     )
 })
@@ -652,7 +652,7 @@ open func displayList(rasterScale: Float) -> DisplayList {
      */
 open func hasText() -> Bool {
     return try!  FfiConverterBool.lift(try! rustCall() {
-    uniffi_resvg_swift_fn_method_svgdocument_has_text(self.uniffiClonePointer(),$0
+    uniffi_resvg_uniffi_fn_method_svgdocument_has_text(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -662,7 +662,7 @@ open func hasText() -> Bool {
      */
 open func height() -> Float {
     return try!  FfiConverterFloat.lift(try! rustCall() {
-    uniffi_resvg_swift_fn_method_svgdocument_height(self.uniffiClonePointer(),$0
+    uniffi_resvg_uniffi_fn_method_svgdocument_height(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -672,7 +672,7 @@ open func height() -> Float {
      */
 open func width() -> Float {
     return try!  FfiConverterFloat.lift(try! rustCall() {
-    uniffi_resvg_swift_fn_method_svgdocument_width(self.uniffiClonePointer(),$0
+    uniffi_resvg_uniffi_fn_method_svgdocument_width(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -3530,23 +3530,23 @@ private var initializationResult: InitializationResult = {
     // Get the bindings contract version from our ComponentInterface
     let bindings_contract_version = 26
     // Get the scaffolding contract version by calling the into the dylib
-    let scaffolding_contract_version = ffi_resvg_swift_uniffi_contract_version()
+    let scaffolding_contract_version = ffi_resvg_uniffi_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_resvg_swift_checksum_method_svgdocument_display_list() != 3139) {
+    if (uniffi_resvg_uniffi_checksum_method_svgdocument_display_list() != 25484) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_resvg_swift_checksum_method_svgdocument_has_text() != 9471) {
+    if (uniffi_resvg_uniffi_checksum_method_svgdocument_has_text() != 17336) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_resvg_swift_checksum_method_svgdocument_height() != 23344) {
+    if (uniffi_resvg_uniffi_checksum_method_svgdocument_height() != 42934) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_resvg_swift_checksum_method_svgdocument_width() != 6978) {
+    if (uniffi_resvg_uniffi_checksum_method_svgdocument_width() != 16624) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_resvg_swift_checksum_constructor_svgdocument_new() != 8515) {
+    if (uniffi_resvg_uniffi_checksum_constructor_svgdocument_new() != 20232) {
         return InitializationResult.apiChecksumMismatch
     }
 

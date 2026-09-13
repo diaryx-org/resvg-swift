@@ -6,7 +6,7 @@
 # SwiftPM/Xcode build dirs for the Swift package, whose manifest lives at the
 # repo root. The UniFFI binding under packages/resvg-swift/uniffi-generated/ is
 # COMMITTED (a version-resolved clone runs no generators) — regenerate it with
-# scripts/gen-bindings.sh; CI diffs it against crates/resvg-swift.
+# scripts/gen-bindings.sh; CI diffs it against crates/resvg-uniffi.
 /.build/
 /.swiftpm/
 packages/resvg-swift/.build/

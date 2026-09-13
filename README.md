@@ -36,7 +36,7 @@ all draw what resvg would draw.
 | part | what it is |
 |------|------------|
 | [`crates/usvg-flatten`](crates/usvg-flatten) | **usvg tree → display list.** Pure Rust, no FFI. `flatten(&tree, &Options { raster_scale })` gives a `Vec<Op>` in paint order: `Fill`, `Stroke`, `PushLayer`/`PopLayer` (opacity, blend, clips), `Image` (encoded bytes), `Raster` (resvg's pixels for a subtree with no vector form). Ships `replay`, a tiny-skia replayer, so the tests can hold `flatten` to resvg's own pixels. |
-| [`crates/resvg-swift`](crates/resvg-swift) | **The UniFFI binding.** `SvgDocument` parses once; `displayList(rasterScale:)` returns the list as Swift value types. Mirrors `usvg-flatten`'s types rather than deriving on them, so the wire format is versioned here. |
+| [`crates/resvg-uniffi`](crates/resvg-uniffi) | **The UniFFI binding.** `SvgDocument` parses once; `displayList(rasterScale:)` returns the list as value types. Mirrors `usvg-flatten`'s types rather than deriving on them, so the wire format is versioned here. UniFFI rather than Swift-specific: Kotlin and Python bindings are a generator run away. |
 | [`packages/resvg-swift`](packages/resvg-swift) | **The Swift package.** `ResvgFFI` is the committed generated binding; `ResvgCoreGraphics` is `CGContext.draw(_:transform:)` — the replayer — and `SVGPicture`, which parses, caches the list per scale, and aspect-fits into a rect. `Package.swift` sits at the repo root because SwiftPM needs it there. |
 
 ## What is vector, what is raster
@@ -62,16 +62,16 @@ exact path clip.
 
 **Two Rust staticlibs cannot share one executable**; each carries its own
 `std`. So the Swift package does not link a library of its own — it references
-the `resvg_swift` symbols and expects the host to have force-loaded an archive
+the `resvg_uniffi` symbols and expects the host to have force-loaded an archive
 that contains them:
 
 - A host that already links a UniFFI crate of its own (leaf's `leaf-ffi`,
-  say) makes `resvg-swift` a Cargo dependency of *that* crate — a
-  `pub use resvg_swift as _;` keeps the scaffolding linked — and force-loads
+  say) makes `resvg-uniffi` a Cargo dependency of *that* crate — a
+  `pub use resvg_uniffi as _;` keeps the scaffolding linked — and force-loads
   the one `.a` it already builds.
-- A host with no Rust of its own builds `crates/resvg-swift` as a staticlib
-  (`cargo build -p resvg-swift --release --target …`) and force-loads it:
-  `OTHER_LDFLAGS = -force_load <path>/libresvg_swift.a`.
+- A host with no Rust of its own builds `crates/resvg-uniffi` as a staticlib
+  (`cargo build -p resvg-uniffi --release --target …`) and force-loads it:
+  `OTHER_LDFLAGS = -force_load <path>/libresvg_uniffi.a`.
 
 Both Swift products are then `.package(url: "https://github.com/diaryx-org/resvg-swift.git", from: "X.Y.Z")`.
 
@@ -79,7 +79,7 @@ Both Swift products are then `.package(url: "https://github.com/diaryx-org/resvg
 
 ```sh
 cargo xtask ci              # fmt, clippy, tests, per-crate check, binding drift
-scripts/gen-bindings.sh     # after changing crates/resvg-swift's surface
+scripts/gen-bindings.sh     # after changing crates/resvg-uniffi's surface
 scripts/test-swift.sh       # the CoreGraphics tests, on a Mac
 ```
 

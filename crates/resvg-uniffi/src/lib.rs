@@ -1,4 +1,4 @@
-//! resvg-swift — usvg's parse and usvg-flatten's display list, across UniFFI.
+//! resvg-uniffi — usvg's parse and usvg-flatten's display list, across UniFFI.
 //!
 //! Swift gets one object, [`SvgDocument`], and one method that matters:
 //! [`SvgDocument::display_list`]. The document is parsed once and kept; the

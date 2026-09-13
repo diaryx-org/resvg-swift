@@ -12,4 +12,4 @@ verify = "cargo xtask ci"
 # before the push is handed back to you is composed from these.
 [[tag_starts]]
 workflow = "publish.yml"
-does = "uploads usvg-flatten and resvg-swift to crates.io"
+does = "uploads usvg-flatten and resvg-uniffi to crates.io"

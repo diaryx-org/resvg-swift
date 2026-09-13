@@ -11,13 +11,13 @@
 // It builds the UniFFI binding + the ResvgCoreGraphics replayer **from
 // source**; the Rust staticlib itself is linked by the consuming app. Two Rust
 // staticlibs cannot share one executable, so an app that already links a Rust
-// FFI crate of its own makes `resvg-swift` a Cargo dependency of that crate and
+// FFI crate of its own makes `resvg-uniffi` a Cargo dependency of that crate and
 // force-loads the one archive; an app with no Rust of its own builds
-// crates/resvg-swift's staticlib and force-loads that. README.md → Linking.
+// crates/resvg-uniffi's staticlib and force-loads that. README.md → Linking.
 //
 // The two `uniffi-generated/` inputs below are committed — a version-resolved
 // clone runs no generators, so they must build as-is. `scripts/gen-bindings.sh`
-// writes them from crates/resvg-swift and CI holds them to it (`--check`).
+// writes them from crates/resvg-uniffi and CI holds them to it (`--check`).
 import PackageDescription
 
 let package = Package(
@@ -30,17 +30,17 @@ let package = Package(
         .library(name: "ResvgCoreGraphics", targets: ["ResvgCoreGraphics"]),
     ],
     targets: [
-        // The C ABI as a clang module (`import resvg_swiftFFI`). No library to
+        // The C ABI as a clang module (`import resvg_uniffiFFI`). No library to
         // link here — the app force-loads the Rust `.a`, so the symbols the
         // generated Swift references stay undefined until the final link.
         .systemLibrary(
-            name: "resvg_swiftFFI",
+            name: "resvg_uniffiFFI",
             path: "packages/resvg-swift/uniffi-generated/headers"
         ),
         // The generated Swift, compiled against that C module.
         .target(
             name: "ResvgFFI",
-            dependencies: ["resvg_swiftFFI"],
+            dependencies: ["resvg_uniffiFFI"],
             path: "packages/resvg-swift/uniffi-generated/Sources/ResvgFFI"
         ),
         // The replayer (committed source).

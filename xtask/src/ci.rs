@@ -47,7 +47,7 @@ pub const JOBS: &[Job] = &[
     Job {
         id: "bindings",
         name: "Swift bindings",
-        about: "the committed UniFFI binding is what crates/resvg-swift produces",
+        about: "the committed UniFFI binding is what crates/resvg-uniffi produces",
         run: bindings,
     },
 ];
@@ -78,7 +78,7 @@ fn test() -> Result<()> {
 /// below is what says so.
 const ISOLATED: &[&[&str]] = &[
     &["-p", "usvg-flatten"],
-    &["-p", "resvg-swift"],
+    &["-p", "resvg-uniffi"],
     &["-p", "xtask"],
 ];
 

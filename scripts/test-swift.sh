@@ -11,9 +11,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-echo "▸ Building resvg-swift (host) staticlib…"
-cargo build -p resvg-swift --manifest-path "$ROOT/Cargo.toml" >/dev/null
-STATIC="$ROOT/target/debug/libresvg_swift.a"
+echo "▸ Building resvg-uniffi (host) staticlib…"
+cargo build -p resvg-uniffi --manifest-path "$ROOT/Cargo.toml" >/dev/null
+STATIC="$ROOT/target/debug/libresvg_uniffi.a"
 [ -f "$STATIC" ] || { echo "missing $STATIC"; exit 1; }
 
 echo "▸ swift test (ResvgCoreGraphics)…"
