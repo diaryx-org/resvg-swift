@@ -1,0 +1,14 @@
+# The org's Rust pin — the number diaryx-org/nix publishes as `versions.rust`,
+# and what leaf's rust-toolchain.toml says. Nothing here needs a recent rustc
+# (the MSRV in Cargo.toml is far lower); the pin is so that every checkout in
+# the org compiles with the same compiler, and because macOS 27's dyld refuses
+# some proc-macro dylibs older rustcs link (diaryx-org/nix explains it). uniffi
+# is a proc-macro crate, so that one bites here.
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"
+# `cargo xtask ci` runs rustfmt and clippy first, so a toolchain rustup
+# auto-installs from this file has to be able to run them. Naming the components
+# makes a fresh machine self-healing; it stays `minimal` plus these two rather
+# than `default`, which would also pull rust-docs and rust-analyzer.
+components = ["rustfmt", "clippy"]

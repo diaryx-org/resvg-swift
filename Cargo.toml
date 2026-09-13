@@ -1,0 +1,29 @@
+[workspace]
+resolver = "3"
+# Listed rather than globbed: `xtask` reads this line to know what CI covers.
+members = [
+  "crates/usvg-flatten",
+  "crates/resvg-swift",
+  "xtask",
+]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+# Minimum supported Rust version. Edition 2024 needs 1.85; let-chains, which
+# the flattener uses, stabilized in 1.88.
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/diaryx-org/resvg-swift"
+readme = "README.md"
+
+[workspace.dependencies]
+# The SVG parser/simplifier and its renderer. Same major as leaf's leaf-raster,
+# so a host linking both gets one copy. `resvg` re-exports `tiny_skia`, and
+# `usvg` re-exports `tiny_skia_path` and `fontdb`, so nothing else is named
+# here.
+usvg = "0.46"
+resvg = "0.46"
+anyhow = "1"
+# Internal crates.
+usvg-flatten = { path = "crates/usvg-flatten", version = "0.1.0" }

@@ -1,0 +1,4 @@
+module resvg_swiftFFI {
+    header "resvg_swiftFFI.h"
+    export *
+}

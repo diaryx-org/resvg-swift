@@ -1,0 +1,18 @@
+[package]
+name = "usvg-flatten"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Flattens a usvg tree into a display list — paths, paints, layers and clips in canvas order — that a vector 2D API (CoreGraphics, Skia, Direct2D) can replay without knowing SVG. What it can't express as vectors it rasterizes through resvg."
+keywords = ["svg", "usvg", "resvg", "vector", "display-list"]
+categories = ["rendering", "graphics"]
+
+[dependencies]
+# usvg does the SVG: CSS, `<use>`, units, text-to-paths. resvg is here for the
+# raster fallback (filters, masks, patterns) and for `replay`, the tiny-skia
+# replayer the tests compare against resvg's own pixels.
+usvg.workspace = true
+resvg.workspace = true

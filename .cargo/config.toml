@@ -1,0 +1,4 @@
+# `cargo xtask <task>` — the workspace task runner (xtask/). `ci` is the checks a
+# release has to pass; `cargo xtask --help` lists the rest.
+[alias]
+xtask = "run --quiet --package xtask --"

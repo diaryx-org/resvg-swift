@@ -1,0 +1,36 @@
+[package]
+name = "resvg-swift"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "UniFFI binding over usvg-flatten: parses an SVG with usvg and hands Swift a vector display list to replay into a CGContext. The Rust half of the resvg-swift package; a host links it into its one Rust staticlib."
+keywords = ["svg", "resvg", "swift", "uniffi", "coregraphics"]
+categories = ["rendering", "external-ffi-bindings"]
+
+# staticlib -> the .a a host force-loads (alongside its own FFI crate).
+# cdylib    -> a .dylib for `uniffi-bindgen --library` to introspect, and for
+#              the Swift tests to link.
+# lib       -> lets a host's own FFI crate depend on this one, so that the
+#              scaffolding lands in the host's single staticlib.
+[lib]
+crate-type = ["staticlib", "cdylib", "lib"]
+
+# The bindings generator. `scripts/gen-bindings.sh` runs it as
+#   cargo run -p resvg-swift --bin uniffi-bindgen -- generate --library …
+# Kept in-tree so the generator version can never drift from the `uniffi`
+# runtime this crate links.
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dependencies]
+usvg-flatten.workspace = true
+usvg.workspace = true
+# The FFI machinery, proc-macro mode (no .udl file). `cli` pulls in
+# `uniffi_bindgen_main` for the bin target above. Same version as leaf-ffi and
+# flower-ffi: a host links exactly one uniffi runtime.
+uniffi = { version = "0.28", features = ["cli"] }
+thiserror = "1"
