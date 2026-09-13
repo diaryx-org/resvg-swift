@@ -18,8 +18,8 @@ use resvg::tiny_skia;
 use usvg::tiny_skia_path as tsp;
 
 use crate::{
-    BlendMode, Clip, DisplayList, FillOp, FillRule, ImageFormat, ImageOp, Layer, LineCap, LineJoin,
-    Op, Paint, Path, PathVerb, RasterOp, Stop, StrokeOp, Transform,
+    BlendMode, Clip, DisplayList, FillOp, FillRule, ImageOp, Layer, LineCap, LineJoin, Op, Paint,
+    Path, PathVerb, RasterOp, Stop, StrokeOp, Transform,
 };
 
 /// Draw `list` onto `pixmap` under `transform` (canvas units to pixels).
@@ -183,14 +183,11 @@ fn draw_stroke(op: &StrokeOp, root: tsp::Transform, pixmap: &mut tiny_skia::Pixm
     );
 }
 
-/// Only PNG is decoded here — tiny-skia ships a PNG decoder and nothing else,
-/// and the replayer exists for tests, which can choose their fixtures. A real
-/// backend decodes with whatever its platform provides.
+/// Decoded with the same crates resvg uses — the same pixels, so an image
+/// test compares the placement and nothing else. A real backend decodes with
+/// whatever its platform provides.
 fn draw_image(op: &ImageOp, root: tsp::Transform, pixmap: &mut tiny_skia::PixmapMut) {
-    if op.format != ImageFormat::Png {
-        return;
-    }
-    let Ok(image) = tiny_skia::Pixmap::decode_png(&op.data) else {
+    let Some(image) = decode::image(op.format, &op.data) else {
         return;
     };
     let quality = if op.smooth {
@@ -218,9 +215,26 @@ fn draw_raster(op: &RasterOp, root: tsp::Transform, pixmap: &mut tiny_skia::Pixm
         op.rect.width / op.width as f32,
         op.rect.height / op.height as f32,
     );
+    let ts = root.pre_concat(place);
+    // The flattener snapped the rectangle to the pixel grid at its scale, so
+    // replaying at that scale is a whole-pixel copy — do exactly that, rather
+    // than resample a picture that already has the right pixels.
+    let unit = |v: f32| (v - 1.0).abs() < 1e-3;
+    let zero = |v: f32| v.abs() < 1e-3;
+    if unit(ts.sx) && unit(ts.sy) && zero(ts.kx) && zero(ts.ky) {
+        pixmap.draw_pixmap(
+            ts.tx.round() as i32,
+            ts.ty.round() as i32,
+            image.as_ref(),
+            &tiny_skia::PixmapPaint::default(),
+            tsp::Transform::identity(),
+            None,
+        );
+        return;
+    }
     blit(
         image.as_ref(),
-        root.pre_concat(place),
+        ts,
         tiny_skia::FilterQuality::Bicubic,
         pixmap,
     );
@@ -350,5 +364,81 @@ fn blend_mode(mode: BlendMode) -> tiny_skia::BlendMode {
         BlendMode::Saturation => tiny_skia::BlendMode::Saturation,
         BlendMode::Color => tiny_skia::BlendMode::Color,
         BlendMode::Luminosity => tiny_skia::BlendMode::Luminosity,
+    }
+}
+
+/// The raster decoders, as resvg's `image.rs` has them: PNG through tiny-skia,
+/// JPEG through zune, GIF's first frame, WebP's first frame. Output is
+/// premultiplied RGBA, which is what a `Pixmap` holds.
+mod decode {
+    use resvg::tiny_skia;
+
+    use crate::ImageFormat;
+
+    pub fn image(format: ImageFormat, data: &[u8]) -> Option<tiny_skia::Pixmap> {
+        match format {
+            ImageFormat::Png => tiny_skia::Pixmap::decode_png(data).ok(),
+            ImageFormat::Jpeg => jpeg(data),
+            ImageFormat::Gif => gif(data),
+            ImageFormat::Webp => webp(data),
+        }
+    }
+
+    fn jpeg(data: &[u8]) -> Option<tiny_skia::Pixmap> {
+        use zune_jpeg::zune_core::colorspace::ColorSpace;
+        use zune_jpeg::zune_core::options::DecoderOptions;
+        let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGBA);
+        let mut decoder =
+            zune_jpeg::JpegDecoder::new_with_options(std::io::Cursor::new(data), options);
+        decoder.decode_headers().ok()?;
+        if decoder.output_colorspace()? != ColorSpace::RGBA {
+            return None;
+        }
+        let pixels = decoder.decode().ok()?;
+        let info = decoder.info()?;
+        let size = tiny_skia::IntSize::from_wh(u32::from(info.width), u32::from(info.height))?;
+        tiny_skia::Pixmap::from_vec(pixels, size)
+    }
+
+    fn gif(data: &[u8]) -> Option<tiny_skia::Pixmap> {
+        let mut options = gif::DecodeOptions::new();
+        options.set_color_output(gif::ColorOutput::RGBA);
+        let mut decoder = options.read_info(data).ok()?;
+        let frame = decoder.read_next_frame().ok()??;
+        let mut pixmap = tiny_skia::Pixmap::new(u32::from(frame.width), u32::from(frame.height))?;
+        premultiply_into(&frame.buffer, pixmap.data_mut());
+        Some(pixmap)
+    }
+
+    fn webp(data: &[u8]) -> Option<tiny_skia::Pixmap> {
+        let mut decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(data)).ok()?;
+        let mut pixels = vec![0; decoder.output_buffer_size()?];
+        decoder.read_image(&mut pixels).ok()?;
+        let (width, height) = decoder.dimensions();
+        let mut pixmap = tiny_skia::Pixmap::new(width, height)?;
+        if decoder.has_alpha() {
+            premultiply_into(&pixels, pixmap.data_mut());
+        } else {
+            let (src, _) = pixels.as_chunks::<3>();
+            let (dst, _) = pixmap.data_mut().as_chunks_mut::<4>();
+            for (s, d) in src.iter().zip(dst) {
+                d[..3].copy_from_slice(s);
+                d[3] = 255;
+            }
+        }
+        Some(pixmap)
+    }
+
+    /// Straight RGBA in, premultiplied RGBA out, rounding as resvg does.
+    fn premultiply_into(src: &[u8], dst: &mut [u8]) {
+        let (src, _) = src.as_chunks::<4>();
+        let (dst, _) = dst.as_chunks_mut::<4>();
+        for (s, d) in src.iter().zip(dst) {
+            let a = f64::from(s[3]) / 255.0;
+            d[0] = (f64::from(s[0]) * a + 0.5) as u8;
+            d[1] = (f64::from(s[1]) * a + 0.5) as u8;
+            d[2] = (f64::from(s[2]) * a + 0.5) as u8;
+            d[3] = s[3];
+        }
     }
 }

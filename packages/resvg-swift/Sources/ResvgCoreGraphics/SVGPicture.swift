@@ -51,6 +51,10 @@ public final class SVGPicture {
     /// `backingScaleFactor` / `contentScaleFactor`; `1` for a PDF), so anything
     /// rasterized comes out at the pixel grid it will be shown on. Vector ops
     /// do not care.
+    ///
+    /// Drawing is clipped to the picture's own canvas, as a browser clips an
+    /// `<img>` to its viewport and resvg to its pixmap: a path that runs past
+    /// the SVG's `width` stops at the edge rather than spilling into the page.
     public func draw(in context: CGContext, rect: CGRect, scale: CGFloat = 1) {
         guard size.width > 0, size.height > 0, rect.width > 0, rect.height > 0 else { return }
         let fit = min(rect.width / size.width, rect.height / size.height)
@@ -59,6 +63,9 @@ public final class SVGPicture {
             x: rect.minX + (rect.width - drawn.width) / 2,
             y: rect.minY + (rect.height - drawn.height) / 2)
         let transform = CGAffineTransform(translationX: origin.x, y: origin.y).scaledBy(x: fit, y: fit)
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.clip(to: CGRect(origin: origin, size: drawn))
         context.draw(displayList(rasterScale: fit * scale), transform: transform)
     }
 }

@@ -1129,8 +1129,11 @@ dependencies = [
 name = "usvg-flatten"
 version = "0.1.0"
 dependencies = [
+ "gif",
+ "image-webp",
  "resvg",
  "usvg",
+ "zune-jpeg",
 ]
 
 [[package]]

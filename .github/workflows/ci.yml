@@ -1,8 +1,11 @@
 name: CI
 # `cargo xtask ci` is the definition of green; this file only decides where it
 # runs. The Rust jobs run on Linux — the committed UniFFI binding is arch-neutral
-# source, so its drift check needs no Mac. The Swift package does, so its tests
-# run on a macOS runner against the staticlib the script builds.
+# source, so its drift check needs no Mac. Its last job fetches resvg's test
+# suite (a 24 MB sparse clone of the resvg repo at the pinned tag) and renders
+# all ~1,700 cases both ways; that is the one network access. The Swift package
+# needs a Mac, so its tests run on a macOS runner against the staticlib the
+# script builds.
 on:
   push: { branches: [main] }
   pull_request: null

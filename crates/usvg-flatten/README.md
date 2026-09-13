@@ -24,7 +24,8 @@ changes.
 The `replay` module rasterizes a display list with tiny-skia. Its purpose is the
 test suite: the same SVG through `resvg` and through `flatten` + `replay` must
 produce the same pixels, which is what proves the flattening lossless without
-any platform renderer in the loop.
+any platform renderer in the loop. That is run over resvg's own test suite —
+1,697 cases at 0.46.0, 1,676 of them bit-for-bit identical, none excluded.
 
 This is the Rust half of [resvg-swift](../../README.md); the Swift half replays
 the list into a `CGContext`.

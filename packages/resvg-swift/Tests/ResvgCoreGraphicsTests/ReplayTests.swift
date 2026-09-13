@@ -174,6 +174,21 @@ final class ReplayTests: XCTestCase {
         XCTAssertEqual(canvas.pixel(20, 35).a, 0)
     }
 
+    func testDrawingIsClippedToTheCanvas() throws {
+        // A 20×10 picture whose rect runs far past its own width, drawn into
+        // 40×40: the overflow must stop at the fitted picture's edge (rows
+        // 10..<30), not paint the rest of the context.
+        let canvas = try draw(
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="10">
+              <rect x="-100" y="-100" width="300" height="300" fill="#ff0000"/>
+            </svg>
+            """)
+        XCTAssertEqual(canvas.pixel(20, 20).r, 255)
+        XCTAssertEqual(canvas.pixel(20, 5).a, 0)
+        XCTAssertEqual(canvas.pixel(20, 35).a, 0)
+    }
+
     func testParseErrorIsThrown() {
         XCTAssertThrowsError(try picture("not an svg"))
     }

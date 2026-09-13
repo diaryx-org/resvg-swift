@@ -20,14 +20,16 @@ use crate::{
 /// at [`Options::raster_scale`], and a node resvg cannot render either (a zero-
 /// size layer, say) is dropped, which is what resvg would do with it.
 pub fn flatten(tree: &usvg::Tree, options: &Options) -> DisplayList {
+    let size = tree.size();
     let mut walker = Walker {
         ops: Vec::new(),
         scale: options.raster_scale,
+        canvas: tsp::Rect::from_xywh(0.0, 0.0, size.width(), size.height())
+            .expect("a usvg tree has a non-zero size"),
     };
     // resvg renders the root's *children* under the caller's transform and
     // never applies the root group's own; same here.
-    let root = tsp::Transform::identity();
-    walker.children(tree.root(), root, root);
+    walker.children(tree.root(), tsp::Transform::identity());
     DisplayList {
         width: tree.size().width(),
         height: tree.size().height(),
@@ -38,45 +40,41 @@ pub fn flatten(tree: &usvg::Tree, options: &Options) -> DisplayList {
 struct Walker {
     ops: Vec<Op>,
     scale: f32,
+    /// The visible area, in canvas units — what a raster fallback is clipped to.
+    canvas: tsp::Rect,
 }
 
 impl Walker {
     /// Emit every child of `group`.
     ///
     /// `ts` maps the children's local space to the canvas — it already includes
-    /// `group`'s own transform. `outer` maps the *tree these nodes belong to*
-    /// onto the canvas: identity for the document itself, the placement
-    /// transform for an SVG nested through `<image>`. Only the raster fallback
-    /// needs it, because usvg's bounding boxes are per tree.
-    fn children(&mut self, group: &usvg::Group, ts: tsp::Transform, outer: tsp::Transform) {
+    /// `group`'s own transform, and for an SVG nested through `<image>` the
+    /// placement of that image too. It is accumulated here from the relative
+    /// transforms, as resvg does, and never read from usvg's absolute ones (see
+    /// [`raster`](crate::raster) for why).
+    fn children(&mut self, group: &usvg::Group, ts: tsp::Transform) {
         for node in group.children() {
-            self.node(node, ts, outer);
+            self.node(node, ts);
         }
     }
 
-    fn node(&mut self, node: &usvg::Node, ts: tsp::Transform, outer: tsp::Transform) {
+    fn node(&mut self, node: &usvg::Node, ts: tsp::Transform) {
         match node {
-            usvg::Node::Group(group) => self.group(node, group, ts, outer),
-            usvg::Node::Path(path) => self.path(node, path, ts, outer),
+            usvg::Node::Group(group) => self.group(node, group, ts),
+            usvg::Node::Path(path) => self.path(node, path, ts),
             usvg::Node::Image(image) => self.image(image, ts),
             // usvg has laid the text out into glyph paths already.
-            usvg::Node::Text(text) => self.group(node, text.flattened(), ts, outer),
+            usvg::Node::Text(text) => self.group(node, text.flattened(), ts),
         }
     }
 
-    fn group(
-        &mut self,
-        node: &usvg::Node,
-        group: &usvg::Group,
-        parent: tsp::Transform,
-        outer: tsp::Transform,
-    ) {
+    fn group(&mut self, node: &usvg::Node, group: &usvg::Group, parent: tsp::Transform) {
         let ts = parent.pre_concat(group.transform());
 
         // A filter or a mask has no vector form here; the whole group is one
         // picture from resvg.
         if !group.filters().is_empty() || group.mask().is_some() {
-            return self.raster(node, outer);
+            return self.raster(node, parent);
         }
 
         // resvg composites through an offscreen layer only when something
@@ -84,13 +82,13 @@ impl Walker {
         // layer here would be a transparency group the backend pays for
         // without effect.
         if !group.should_isolate() {
-            return self.children(group, ts, outer);
+            return self.children(group, ts);
         }
 
         let clips = match group.clip_path() {
             Some(clip) => match clip_chain(clip, ts) {
                 Some(clips) => clips,
-                None => return self.raster(node, outer),
+                None => return self.raster(node, parent),
             },
             None => Vec::new(),
         };
@@ -100,17 +98,11 @@ impl Walker {
             blend: blend_mode(group.blend_mode()),
             clips,
         }));
-        self.children(group, ts, outer);
+        self.children(group, ts);
         self.ops.push(Op::PopLayer);
     }
 
-    fn path(
-        &mut self,
-        node: &usvg::Node,
-        path: &usvg::Path,
-        ts: tsp::Transform,
-        outer: tsp::Transform,
-    ) {
+    fn path(&mut self, node: &usvg::Node, path: &usvg::Path, ts: tsp::Transform) {
         if !path.is_visible() {
             return;
         }
@@ -124,7 +116,7 @@ impl Walker {
             .stroke()
             .map(|stroke| paint(stroke.paint(), stroke.opacity().get()));
         if matches!(fill_paint, Some(None)) || matches!(stroke_paint, Some(None)) {
-            return self.raster(node, outer);
+            return self.raster(node, ts);
         }
 
         let outline = convert_path(path.data());
@@ -174,9 +166,9 @@ impl Walker {
             return;
         }
         let (data, format) = match image.kind() {
-            // A nested document is vectors too. Its nodes' bounding boxes are
-            // in its own canvas, so `ts` becomes their `outer`.
-            usvg::ImageKind::SVG(tree) => return self.children(tree.root(), ts, ts),
+            // A nested document is vectors too, drawn under the image's
+            // placement — which is what `ts` already is.
+            usvg::ImageKind::SVG(tree) => return self.children(tree.root(), ts),
             usvg::ImageKind::PNG(data) => (data, ImageFormat::Png),
             usvg::ImageKind::JPEG(data) => (data, ImageFormat::Jpeg),
             usvg::ImageKind::GIF(data) => (data, ImageFormat::Gif),
@@ -199,8 +191,10 @@ impl Walker {
     }
 
     /// The escape hatch: `node` as resvg paints it, at this list's scale.
-    fn raster(&mut self, node: &usvg::Node, outer: tsp::Transform) {
-        if let Some(op) = crate::raster::render(node, outer, self.scale) {
+    /// `parent` is the transform in force where `node` sits — for a path its
+    /// `ts`, for a group the transform *before* the group's own.
+    fn raster(&mut self, node: &usvg::Node, parent: tsp::Transform) {
+        if let Some(op) = crate::raster::render(node, parent, self.canvas, self.scale) {
             self.ops.push(Op::Raster(op));
         }
     }

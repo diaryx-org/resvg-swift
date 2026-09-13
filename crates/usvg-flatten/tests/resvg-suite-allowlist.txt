@@ -1,0 +1,6 @@
+# Cases from resvg's test suite that `flatten` + `replay` may render
+# differently from resvg. One per line: the case name as printed by the test
+# (e.g. `paint-servers/pattern/simple-case`), whitespace, why. The test fails
+# if a listed case starts passing, so the list can only shrink honestly.
+#
+# Empty at resvg 0.46.0.

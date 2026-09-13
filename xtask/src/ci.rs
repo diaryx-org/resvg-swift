@@ -50,6 +50,12 @@ pub const JOBS: &[Job] = &[
         about: "the committed UniFFI binding is what crates/resvg-uniffi produces",
         run: bindings,
     },
+    Job {
+        id: "suite",
+        name: "resvg test suite",
+        about: "every SVG resvg tests itself with renders the same through flatten (fetches the suite)",
+        run: suite,
+    },
 ];
 
 fn fmt() -> Result<()> {
@@ -93,6 +99,26 @@ fn package_isolation() -> Result<()> {
 
 fn bindings() -> Result<()> {
     run(cmd("bash").args(["scripts/gen-bindings.sh", "--check"]))
+}
+
+/// Last because it is the slow one — a network fetch the first time, then
+/// ~1,700 renders twice over — and because the fast jobs catch most things.
+/// `--release`: the debug build takes three times as long for no more
+/// information.
+fn suite() -> Result<()> {
+    run(cmd("bash").arg("scripts/fetch-resvg-tests.sh"))?;
+    run(cargo()
+        .args([
+            "test",
+            "--release",
+            "-p",
+            "usvg-flatten",
+            "--test",
+            "resvg_suite",
+            "--",
+            "--nocapture",
+        ])
+        .env("RESVG_SUITE_REQUIRED", "1"))
 }
 
 #[derive(clap::Args)]

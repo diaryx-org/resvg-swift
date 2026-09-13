@@ -16,3 +16,9 @@ categories = ["rendering", "graphics"]
 # replayer the tests compare against resvg's own pixels.
 usvg.workspace = true
 resvg.workspace = true
+# The raster decoders `replay` uses for `Image` ops — the same crates at the
+# same versions resvg links, so they cost the build nothing and produce the
+# same pixels resvg would.
+zune-jpeg = "0.5.8"
+gif = "0.14.1"
+image-webp = "0.2.4"
