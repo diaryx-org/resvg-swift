@@ -52,7 +52,7 @@ extension CGContext {
     private func fill(_ op: FillOp, root: CGAffineTransform) {
         saveGState()
         defer { restoreGState() }
-        concatenate(root.concatenating(op.transform.cg))
+        concatenate(op.transform.cg.concatenating(root))
         setShouldAntialias(op.antialias)
         addPath(op.path.cg)
         switch op.paint {
@@ -73,7 +73,7 @@ extension CGContext {
         defer { restoreGState() }
         // Transform first, pen second: the width is in local units and
         // stretches with the path, as SVG strokes do.
-        concatenate(root.concatenating(op.transform.cg))
+        concatenate(op.transform.cg.concatenating(root))
         setShouldAntialias(op.antialias)
         setLineWidth(CGFloat(op.stroke.width))
         setLineCap(op.stroke.cap.cg)
@@ -143,11 +143,11 @@ extension CGContext {
             return
         }
         if shapes.count == 1 {
-            addPath(first.path.cg.placed(under: root.concatenating(first.transform.cg)))
+            addPath(first.path.cg.placed(under: first.transform.cg.concatenating(root)))
             clip(using: first.rule.cg)
             return
         }
-        let paths = shapes.map { ($0.path.cg, root.concatenating($0.transform.cg)) }
+        let paths = shapes.map { ($0.path.cg, $0.transform.cg.concatenating(root)) }
         let sameRule = shapes.allSatisfy { $0.rule == first.rule }
         if sameRule, paths.disjoint {
             let union = CGMutablePath()
@@ -166,7 +166,7 @@ extension CGContext {
         // The union's extent in device pixels is the mask's size.
         var bounds = CGRect.null
         for shape in shapes {
-            let toDevice = root.concatenating(shape.transform.cg).concatenating(device)
+            let toDevice = shape.transform.cg.concatenating(root).concatenating(device)
             bounds = bounds.union(shape.path.cg.boundingBoxOfPath.applying(toDevice))
         }
         let pixels = bounds.integral
@@ -183,7 +183,7 @@ extension CGContext {
         mask.translateBy(x: -pixels.minX, y: -pixels.minY)
         mask.setFillColor(gray: 1, alpha: 1)
         for shape in shapes {
-            mask.addPath(shape.path.cg.placed(under: root.concatenating(shape.transform.cg).concatenating(device)))
+            mask.addPath(shape.path.cg.placed(under: shape.transform.cg.concatenating(root).concatenating(device)))
             mask.fillPath(using: shape.rule.cg)
         }
         guard let image = mask.makeImage() else {
@@ -205,7 +205,7 @@ extension CGContext {
             let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else { return }
         let rect = CGRect(x: 0, y: 0, width: CGFloat(op.width), height: CGFloat(op.height))
-        drawFlipped(image, in: rect, under: root.concatenating(op.transform.cg), smooth: op.smooth)
+        drawFlipped(image, in: rect, under: op.transform.cg.concatenating(root), smooth: op.smooth)
     }
 
     private func draw(_ op: RasterOp, root: CGAffineTransform) {

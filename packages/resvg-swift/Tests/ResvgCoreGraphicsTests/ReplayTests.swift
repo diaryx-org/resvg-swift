@@ -193,3 +193,21 @@ final class ReplayTests: XCTestCase {
         XCTAssertThrowsError(try picture("not an svg"))
     }
 }
+
+extension ReplayTests {
+    /// A group's translate is in canvas units and must be scaled by the fit,
+    /// not applied after it: a 20-unit canvas drawn into 40 pixels puts a
+    /// square translated to (10, 10) at pixel (20, 20), not (10, 10).
+    func testAnOpTransformIsScaledByTheFit() throws {
+        let canvas = Canvas(width: 40, height: 40)
+        try picture(
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+              <g transform="translate(10 10)"><rect width="5" height="5" fill="#ff0000"/></g>
+            </svg>
+            """
+        ).draw(in: canvas.context, rect: CGRect(x: 0, y: 0, width: 40, height: 40))
+        XCTAssertEqual(canvas.pixel(25, 25).r, 255, "inside the square, scaled and translated")
+        XCTAssertEqual(canvas.pixel(15, 15).a, 0, "where the square would be if the translate were not scaled")
+    }
+}
