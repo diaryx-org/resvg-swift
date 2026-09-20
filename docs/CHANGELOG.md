@@ -20,3 +20,8 @@ arriving as a vector where it was a raster is exactly that.
 _No commits since the last tag._
 
 <!-- git-cliff:end -->
+
+## v0.1.1 — 2026-09-19
+
+_No commits since the last tag._
+
