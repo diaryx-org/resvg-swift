@@ -21,6 +21,24 @@ _No commits since the last tag._
 
 <!-- git-cliff:end -->
 
+## v0.1.2 — 2026-09-20
+
+### Added
+
+- **swift** — SVGPicture.fitTransform, the fit draw(in:rect:) draws under ([`6df479a`](https://github.com/diaryx-org/resvg-swift/commit/6df479aa4f6d2ae019386ef536bf66dd1f1c1ae2))
+
+### Fixed
+
+- **swift** — an op's transform is applied before the fit, not after it ([`b1ccb73`](https://github.com/diaryx-org/resvg-swift/commit/b1ccb7305770e998bf41078a97844a718da789a7))
+
+### Behavioural changes
+
+- A picture drawn at any scale other than 1:1 now places
+every op that carries its own transform (a `<g transform>`, a `<marker>`,
+a `<use>`) at the position the SVG says; before, such ops were offset by
+the fit factor while untransformed ops were placed correctly.
+
+
 ## v0.1.1 — 2026-09-19
 
 _No commits since the last tag._

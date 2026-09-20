@@ -620,7 +620,7 @@ dependencies = [
 
 [[package]]
 name = "resvg-uniffi"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "thiserror",
  "uniffi",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "usvg-flatten"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "gif",
  "image-webp",
@@ -1186,7 +1186,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
