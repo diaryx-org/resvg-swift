@@ -12,6 +12,9 @@ import ResvgCoreGraphics
 
 let picture = try SVGPicture(contentsOf: url)
 picture.draw(in: context, rect: bounds, scale: window.backingScaleFactor)
+
+// Where a point in the picture lands, and what a point in the view is over:
+let userPoint = viewPoint.applying(picture.fitTransform(in: bounds).inverted())
 ```
 
 ## Why this exists

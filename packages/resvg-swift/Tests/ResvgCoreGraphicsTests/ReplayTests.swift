@@ -174,6 +174,24 @@ final class ReplayTests: XCTestCase {
         XCTAssertEqual(canvas.pixel(20, 35).a, 0)
     }
 
+    func testFitTransformIsTheFitDrawUses() throws {
+        // The same 20×10 picture into 40×40: the top-left of the picture lands
+        // at (0, 10), its far corner at (40, 30), and the inverse maps back.
+        let pic = try picture(
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="10">
+              <rect width="20" height="10" fill="#ff0000"/>
+            </svg>
+            """)
+        let t = pic.fitTransform(in: CGRect(x: 0, y: 0, width: 40, height: 40))
+        XCTAssertEqual(t.a, 2)
+        XCTAssertEqual(t.d, 2)
+        XCTAssertEqual(CGPoint.zero.applying(t), CGPoint(x: 0, y: 10))
+        XCTAssertEqual(CGPoint(x: 20, y: 10).applying(t), CGPoint(x: 40, y: 30))
+        XCTAssertEqual(CGPoint(x: 20, y: 20).applying(t.inverted()), CGPoint(x: 10, y: 5))
+        XCTAssertEqual(pic.fitTransform(in: .zero), .identity)
+    }
+
     func testDrawingIsClippedToTheCanvas() throws {
         // A 20×10 picture whose rect runs far past its own width, drawn into
         // 40×40: the overflow must stop at the fitted picture's edge (rows

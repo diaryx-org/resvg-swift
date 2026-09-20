@@ -57,15 +57,28 @@ public final class SVGPicture {
     /// the SVG's `width` stops at the edge rather than spilling into the page.
     public func draw(in context: CGContext, rect: CGRect, scale: CGFloat = 1) {
         guard size.width > 0, size.height > 0, rect.width > 0, rect.height > 0 else { return }
+        let transform = fitTransform(in: rect)
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.clip(to: CGRect(origin: .zero, size: size).applying(transform))
+        context.draw(displayList(rasterScale: transform.a * scale), transform: transform)
+    }
+
+    /// The transform `draw(in:rect:)` draws under: user units → `rect`,
+    /// uniformly scaled to fit and centred on the leftover axis. Apply it to
+    /// a point in the picture to find where it lands, or its inverse to a
+    /// point in `rect` to find what it is over — a hit test that uses this
+    /// cannot disagree with what was drawn. `a` (== `d`) is the scale.
+    ///
+    /// The identity for an empty picture or rect, since there is nothing to
+    /// fit and `draw` draws nothing.
+    public func fitTransform(in rect: CGRect) -> CGAffineTransform {
+        guard size.width > 0, size.height > 0, rect.width > 0, rect.height > 0 else { return .identity }
         let fit = min(rect.width / size.width, rect.height / size.height)
         let drawn = CGSize(width: size.width * fit, height: size.height * fit)
         let origin = CGPoint(
             x: rect.minX + (rect.width - drawn.width) / 2,
             y: rect.minY + (rect.height - drawn.height) / 2)
-        let transform = CGAffineTransform(translationX: origin.x, y: origin.y).scaledBy(x: fit, y: fit)
-        context.saveGState()
-        defer { context.restoreGState() }
-        context.clip(to: CGRect(origin: origin, size: drawn))
-        context.draw(displayList(rasterScale: fit * scale), transform: transform)
+        return CGAffineTransform(translationX: origin.x, y: origin.y).scaledBy(x: fit, y: fit)
     }
 }
