@@ -113,6 +113,14 @@ fn system_fonts() -> Arc<usvg::fontdb::Database> {
         .get_or_init(|| {
             let mut db = usvg::fontdb::Database::new();
             db.load_system_fonts();
+            // fontdb knows macOS's font directories and not iOS's: under
+            // `target_os = "ios"` it takes its Linux branch and scans
+            // `/usr/share/fonts`, which is empty, so every `<text>` was
+            // dropped. iOS keeps its faces under /System/Library/Fonts, in
+            // subdirectories an app may read; the walk is recursive. (The
+            // simulator sees the host Mac's directory of the same name.)
+            #[cfg(target_os = "ios")]
+            db.load_fonts_dir("/System/Library/Fonts");
             Arc::new(db)
         })
         .clone()
