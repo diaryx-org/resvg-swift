@@ -21,6 +21,17 @@ _No commits since the last tag._
 
 <!-- git-cliff:end -->
 
+## v0.1.3 — 2026-09-21
+
+### Fixed
+
+- load iOS's fonts — `<text>` was dropped on every iOS device ([`a5d6f87`](https://github.com/diaryx-org/resvg-swift/commit/a5d6f874765a0d2a5a2b11cde78332a260bedc29))
+
+### Behavioural changes
+
+- on iOS, with `load_system_fonts` on, `<text>` in a system family now lays out and draws where it was dropped before.
+
+
 ## v0.1.2 — 2026-09-20
 
 ### Added
