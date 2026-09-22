@@ -19,5 +19,5 @@ What stands between this checkout and a `0.1.0` that leaf can pin:
 - Then `dx release <spec>` cuts bump, changelog, commit, and tag, and the tag
   push runs `publish.yml`.
 
-After that, leaf's task (`leaf/docs/tasks/svg-through-resvg-swift.md`) can
+After that, leaf's task (`leaf/docs/tasks/closed/svg-through-resvg-swift.md`) can
 take the pin.
