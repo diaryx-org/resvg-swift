@@ -21,6 +21,20 @@ _No commits since the last tag._
 
 <!-- git-cliff:end -->
 
+## v0.1.4 — 2026-09-26
+
+### Breaking
+
+- **deps** — uniffi 0.32 ([`5bfcf75`](https://github.com/diaryx-org/resvg-swift/commit/5bfcf754fbc687177a26bf53d85f2a50c0fbf912))
+
+### Behavioural changes
+
+- the generated Swift objects are handle-based rather than
+pointer-based — `init(unsafeFromHandle:)`, `NoHandle`, `uniffiCloneHandle()`
+replace `init(unsafeFromRawPointer:)`, `NoPointer`, `uniffiClonePointer()` —
+and `SvgDocumentProtocol` and every record now conform to `Sendable`.
+
+
 ## v0.1.3 — 2026-09-21
 
 ### Fixed
