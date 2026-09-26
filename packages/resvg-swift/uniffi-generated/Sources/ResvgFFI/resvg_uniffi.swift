@@ -39,6 +39,52 @@ fileprivate extension ForeignBytes {
     init(bufferPointer: UnsafeBufferPointer<UInt8>) {
         self.init(len: Int32(bufferPointer.count), data: bufferPointer.baseAddress)
     }
+
+    init(rawBufferPointer: UnsafeRawBufferPointer) {
+        self.init(
+            len: Int32(rawBufferPointer.count),
+            data: rawBufferPointer.baseAddress?.assumingMemoryBound(to: UInt8.self)
+        )
+    }
+}
+
+// Converter for `&[u8]` / `[ByRef] bytes` arguments.
+//
+// Conforms to `FfiConverter` so the compiler enforces the full converter
+// method set. Only the scope-bound `lower(_:_body:)` overload is sound —
+// zero-copy byte buffers only flow foreign -> Rust, and only in argument
+// position. The four protocol-witness methods (`lift`, `lower`, `read`,
+// `write`) `fatalError` at runtime if anyone reaches them.
+//
+// The scope-bound `lower` takes a closure because the `ForeignBytes`
+// pointer is only guaranteed valid for the duration of
+// `Data.withUnsafeBytes`. Callers must run the full FFI call inside
+// the closure body.
+fileprivate enum FfiConverterByRefBytes: FfiConverter {
+    typealias SwiftType = Data
+    typealias FfiType = ForeignBytes
+
+    static func lower<R>(_ value: Data, _ body: (ForeignBytes) throws -> R) rethrows -> R {
+        return try value.withUnsafeBytes { rawBuf in
+            try body(ForeignBytes(rawBufferPointer: rawBuf))
+        }
+    }
+
+    static func lower(_ value: Data) -> ForeignBytes {
+        fatalError("ByRef bytes cannot use the plain lower: returning ForeignBytes escapes the Data.withUnsafeBytes scope. Use the scope-bound lower(_:_body:) overload instead.")
+    }
+
+    static func lift(_ value: ForeignBytes) throws -> Data {
+        fatalError("ByRef bytes cannot be lifted: zero-copy &[u8] only flows foreign->Rust")
+    }
+
+    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Data {
+        fatalError("ByRef bytes cannot be read from a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+    }
+
+    static func write(_ value: Data, into buf: inout [UInt8]) {
+        fatalError("ByRef bytes cannot be written to a buffer: zero-copy &[u8] is only supported in argument position, not nested in records/options/etc.")
+    }
 }
 
 // For every type used in the interface, we provide helper methods for conveniently
@@ -281,7 +327,7 @@ private func makeRustCall<T, E: Swift.Error>(
     _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T,
     errorHandler: ((RustBuffer) throws -> E)?
 ) throws -> T {
-    uniffiEnsureInitialized()
+    uniffiEnsureResvgUniffiInitialized()
     var callStatus = RustCallStatus.init()
     let returnedVal = callback(&callStatus)
     try uniffiCheckCallStatus(callStatus: callStatus, errorHandler: errorHandler)
@@ -352,18 +398,29 @@ private func uniffiTraitInterfaceCallWithError<T, E>(
         callStatus.pointee.errorBuf = FfiConverterString.lower(String(describing: error))
     }
 }
-fileprivate class UniffiHandleMap<T> {
-    private var map: [UInt64: T] = [:]
+// Initial value and increment amount for handles. 
+// These ensure that SWIFT handles always have the lowest bit set
+fileprivate let UNIFFI_HANDLEMAP_INITIAL: UInt64 = 1
+fileprivate let UNIFFI_HANDLEMAP_DELTA: UInt64 = 2
+
+fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
+    // All mutation happens with this lock held, which is why we implement @unchecked Sendable.
     private let lock = NSLock()
-    private var currentHandle: UInt64 = 1
+    private var map: [UInt64: T] = [:]
+    private var currentHandle: UInt64 = UNIFFI_HANDLEMAP_INITIAL
 
     func insert(obj: T) -> UInt64 {
         lock.withLock {
-            let handle = currentHandle
-            currentHandle += 1
-            map[handle] = obj
-            return handle
+            return doInsert(obj)
         }
+    }
+
+    // Low-level insert function, this assumes `lock` is held.
+    private func doInsert(_ obj: T) -> UInt64 {
+        let handle = currentHandle
+        currentHandle += UNIFFI_HANDLEMAP_DELTA
+        map[handle] = obj
+        return handle
     }
 
      func get(handle: UInt64) throws -> T {
@@ -372,6 +429,15 @@ fileprivate class UniffiHandleMap<T> {
                 throw UniffiInternalError.unexpectedStaleHandle
             }
             return obj
+        }
+    }
+
+     func clone(handle: UInt64) throws -> UInt64 {
+        try lock.withLock {
+            guard let obj = map[handle] else {
+                throw UniffiInternalError.unexpectedStaleHandle
+            }
+            return doInsert(obj)
         }
     }
 
@@ -483,7 +549,11 @@ fileprivate struct FfiConverterString: FfiConverter {
             return String()
         }
         let bytes = UnsafeBufferPointer<UInt8>(start: value.data!, count: Int(value.len))
-        return String(bytes: bytes, encoding: String.Encoding.utf8)!
+        // Use Swift's native UTF-8 decoder; `String(bytes:encoding:.utf8)` goes
+        // through Foundation's NSString and silently strips a leading U+FEFF BOM.
+        // Invalid UTF-8 substitutes U+FFFD instead of trapping (unreachable
+        // given Rust's `String` invariant).
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     public static func lower(_ value: String) -> RustBuffer {
@@ -499,7 +569,8 @@ fileprivate struct FfiConverterString: FfiConverter {
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> String {
         let len: Int32 = try readInt(&buf)
-        return String(bytes: try readBytes(&buf, count: Int(len)), encoding: String.Encoding.utf8)!
+        // See `lift` above for why we avoid Foundation's NSString-backed decoder here.
+        return String(decoding: try readBytes(&buf, count: Int(len)), as: UTF8.self)
     }
 
     public static func write(_ value: String, into buf: inout [UInt8]) {
@@ -534,7 +605,7 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
  * A parsed SVG. Parsing is the expensive part — the XML, the CSS, the text
  * layout — so a host keeps this and asks it for a display list per draw.
  */
-public protocol SvgDocumentProtocol : AnyObject {
+public protocol SvgDocumentProtocol: AnyObject, Sendable {
     
     /**
      * The picture as a display list.
@@ -563,68 +634,71 @@ public protocol SvgDocumentProtocol : AnyObject {
     func width()  -> Float
     
 }
-
 /**
  * A parsed SVG. Parsing is the expensive part — the XML, the CSS, the text
  * layout — so a host keeps this and asks it for a display list per draw.
  */
-open class SvgDocument:
-    SvgDocumentProtocol {
-    fileprivate let pointer: UnsafeMutableRawPointer!
+open class SvgDocument: SvgDocumentProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
 
-    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public struct NoPointer {
+    public struct NoHandle {
         public init() {}
     }
 
     // TODO: We'd like this to be `private` but for Swifty reasons,
     // we can't implement `FfiConverter` without making this `required` and we can't
     // make it `required` without making it `public`.
-    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
-        self.pointer = pointer
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
     }
 
     // This constructor can be used to instantiate a fake object.
-    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
     //
     // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public init(noPointer: NoPointer) {
-        self.pointer = nil
+    public init(noHandle: NoHandle) {
+        self.handle = 0
     }
 
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
-        return try! rustCall { uniffi_resvg_uniffi_fn_clone_svgdocument(self.pointer, $0) }
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_resvg_uniffi_fn_clone_svgdocument(self.handle, $0) }
     }
     /**
      * Parse `data` — plain or gzip-compressed SVG.
      */
 public convenience init(data: Data, options: ParseOptions)throws  {
-    let pointer =
-        try rustCallWithError(FfiConverterTypeSvgError.lift) {
+    let handle =
+        try rustCallWithError(FfiConverterTypeSvgError_lift) {
+        uniffiCallStatus in
     uniffi_resvg_uniffi_fn_constructor_svgdocument_new(
         FfiConverterData.lower(data),
-        FfiConverterTypeParseOptions.lower(options),$0
+        FfiConverterTypeParseOptions_lower(options),uniffiCallStatus
     )
 }
-    self.init(unsafeFromRawPointer: pointer)
+    self.init(unsafeFromHandle: handle)
 }
 
     deinit {
-        guard let pointer = pointer else {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
             return
         }
 
-        try! rustCall { uniffi_resvg_uniffi_fn_free_svgdocument(pointer, $0) }
+        try! rustCall { uniffi_resvg_uniffi_fn_free_svgdocument(handle, $0) }
     }
 
     
@@ -638,10 +712,12 @@ public convenience init(data: Data, options: ParseOptions)throws  {
      * points wide on a 2× display passes `6.0`. Vector ops are the same at
      * every scale.
      */
-open func displayList(rasterScale: Float) -> DisplayList {
-    return try!  FfiConverterTypeDisplayList.lift(try! rustCall() {
-    uniffi_resvg_uniffi_fn_method_svgdocument_display_list(self.uniffiClonePointer(),
-        FfiConverterFloat.lower(rasterScale),$0
+open func displayList(rasterScale: Float) -> DisplayList  {
+    return try!  FfiConverterTypeDisplayList_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_resvg_uniffi_fn_method_svgdocument_display_list(
+            self.uniffiCloneHandle(),
+        FfiConverterFloat.lower(rasterScale),uniffiCallStatus
     )
 })
 }
@@ -650,9 +726,11 @@ open func displayList(rasterScale: Float) -> DisplayList {
      * Whether the document has `<text>` — a host may want to know that fonts
      * mattered to what it is showing.
      */
-open func hasText() -> Bool {
+open func hasText() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
-    uniffi_resvg_uniffi_fn_method_svgdocument_has_text(self.uniffiClonePointer(),$0
+        uniffiCallStatus in
+    uniffi_resvg_uniffi_fn_method_svgdocument_has_text(
+            self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
 }
@@ -660,9 +738,11 @@ open func hasText() -> Bool {
     /**
      * The document's height in user units.
      */
-open func height() -> Float {
+open func height() -> Float  {
     return try!  FfiConverterFloat.lift(try! rustCall() {
-    uniffi_resvg_uniffi_fn_method_svgdocument_height(self.uniffiClonePointer(),$0
+        uniffiCallStatus in
+    uniffi_resvg_uniffi_fn_method_svgdocument_height(
+            self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
 }
@@ -670,72 +750,67 @@ open func height() -> Float {
     /**
      * The document's width in user units — its `width` as usvg resolved it.
      */
-open func width() -> Float {
+open func width() -> Float  {
     return try!  FfiConverterFloat.lift(try! rustCall() {
-    uniffi_resvg_uniffi_fn_method_svgdocument_width(self.uniffiClonePointer(),$0
+        uniffiCallStatus in
+    uniffi_resvg_uniffi_fn_method_svgdocument_width(
+            self.uniffiCloneHandle(),uniffiCallStatus
     )
 })
 }
     
 
+    
 }
+
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeSvgDocument: FfiConverter {
-
-    typealias FfiType = UnsafeMutableRawPointer
+    typealias FfiType = UInt64
     typealias SwiftType = SvgDocument
 
-    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> SvgDocument {
-        return SvgDocument(unsafeFromRawPointer: pointer)
+    public static func lift(_ handle: UInt64) throws -> SvgDocument {
+        return SvgDocument(unsafeFromHandle: handle)
     }
 
-    public static func lower(_ value: SvgDocument) -> UnsafeMutableRawPointer {
-        return value.uniffiClonePointer()
+    public static func lower(_ value: SvgDocument) -> UInt64 {
+        return value.uniffiCloneHandle()
     }
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SvgDocument {
-        let v: UInt64 = try readInt(&buf)
-        // The Rust code won't compile if a pointer won't fit in a UInt64.
-        // We have to go via `UInt` because that's the thing that's the size of a pointer.
-        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if (ptr == nil) {
-            throw UniffiInternalError.unexpectedNullPointer
-        }
-        return try lift(ptr!)
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
     }
 
     public static func write(_ value: SvgDocument, into buf: inout [UInt8]) {
-        // This fiddling is because `Int` is the thing that's the same size as a pointer.
-        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
-        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+        writeInt(&buf, lower(value))
     }
 }
 
 
-
-
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeSvgDocument_lift(_ pointer: UnsafeMutableRawPointer) throws -> SvgDocument {
-    return try FfiConverterTypeSvgDocument.lift(pointer)
+public func FfiConverterTypeSvgDocument_lift(_ handle: UInt64) throws -> SvgDocument {
+    return try FfiConverterTypeSvgDocument.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeSvgDocument_lower(_ value: SvgDocument) -> UnsafeMutableRawPointer {
+public func FfiConverterTypeSvgDocument_lower(_ value: SvgDocument) -> UInt64 {
     return FfiConverterTypeSvgDocument.lower(value)
 }
+
+
 
 
 /**
  * One `clipPath`: the union of its shapes.
  */
-public struct Clip {
+public struct Clip: Equatable, Hashable {
     public var shapes: [ClipShape]
 
     // Default memberwise initializers are never public by default, so we
@@ -743,23 +818,15 @@ public struct Clip {
     public init(shapes: [ClipShape]) {
         self.shapes = shapes
     }
+
+    
+
+    
 }
 
-
-
-extension Clip: Equatable, Hashable {
-    public static func ==(lhs: Clip, rhs: Clip) -> Bool {
-        if lhs.shapes != rhs.shapes {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(shapes)
-    }
-}
-
+#if compiler(>=6)
+extension Clip: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -796,7 +863,7 @@ public func FfiConverterTypeClip_lower(_ value: Clip) -> RustBuffer {
 /**
  * One shape of a clip.
  */
-public struct ClipShape {
+public struct ClipShape: Equatable, Hashable {
     public var path: Path
     /**
      * Local to canvas.
@@ -814,31 +881,15 @@ public struct ClipShape {
         self.transform = transform
         self.rule = rule
     }
+
+    
+
+    
 }
 
-
-
-extension ClipShape: Equatable, Hashable {
-    public static func ==(lhs: ClipShape, rhs: ClipShape) -> Bool {
-        if lhs.path != rhs.path {
-            return false
-        }
-        if lhs.transform != rhs.transform {
-            return false
-        }
-        if lhs.rule != rhs.rule {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(path)
-        hasher.combine(transform)
-        hasher.combine(rule)
-    }
-}
-
+#if compiler(>=6)
+extension ClipShape: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -879,7 +930,7 @@ public func FfiConverterTypeClipShape_lower(_ value: ClipShape) -> RustBuffer {
 /**
  * An opaque sRGB colour. Opacity travels separately.
  */
-public struct Color {
+public struct Color: Equatable, Hashable {
     public var red: UInt8
     public var green: UInt8
     public var blue: UInt8
@@ -891,31 +942,15 @@ public struct Color {
         self.green = green
         self.blue = blue
     }
+
+    
+
+    
 }
 
-
-
-extension Color: Equatable, Hashable {
-    public static func ==(lhs: Color, rhs: Color) -> Bool {
-        if lhs.red != rhs.red {
-            return false
-        }
-        if lhs.green != rhs.green {
-            return false
-        }
-        if lhs.blue != rhs.blue {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(red)
-        hasher.combine(green)
-        hasher.combine(blue)
-    }
-}
-
+#if compiler(>=6)
+extension Color: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -956,7 +991,7 @@ public func FfiConverterTypeColor_lower(_ value: Color) -> RustBuffer {
 /**
  * A dash pattern.
  */
-public struct Dash {
+public struct Dash: Equatable, Hashable {
     /**
      * On/off lengths. Even in length and non-empty.
      */
@@ -972,27 +1007,15 @@ public struct Dash {
         self.array = array
         self.offset = offset
     }
+
+    
+
+    
 }
 
-
-
-extension Dash: Equatable, Hashable {
-    public static func ==(lhs: Dash, rhs: Dash) -> Bool {
-        if lhs.array != rhs.array {
-            return false
-        }
-        if lhs.offset != rhs.offset {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(array)
-        hasher.combine(offset)
-    }
-}
-
+#if compiler(>=6)
+extension Dash: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1031,7 +1054,7 @@ public func FfiConverterTypeDash_lower(_ value: Dash) -> RustBuffer {
 /**
  * The flattened picture.
  */
-public struct DisplayList {
+public struct DisplayList: Equatable, Hashable {
     /**
      * Canvas width in user units.
      */
@@ -1063,31 +1086,15 @@ public struct DisplayList {
         self.height = height
         self.ops = ops
     }
+
+    
+
+    
 }
 
-
-
-extension DisplayList: Equatable, Hashable {
-    public static func ==(lhs: DisplayList, rhs: DisplayList) -> Bool {
-        if lhs.width != rhs.width {
-            return false
-        }
-        if lhs.height != rhs.height {
-            return false
-        }
-        if lhs.ops != rhs.ops {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(width)
-        hasher.combine(height)
-        hasher.combine(ops)
-    }
-}
-
+#if compiler(>=6)
+extension DisplayList: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1128,7 +1135,7 @@ public func FfiConverterTypeDisplayList_lower(_ value: DisplayList) -> RustBuffe
 /**
  * Fill a path.
  */
-public struct FillOp {
+public struct FillOp: Equatable, Hashable {
     public var path: Path
     /**
      * Local to canvas.
@@ -1164,43 +1171,15 @@ public struct FillOp {
         self.rule = rule
         self.antialias = antialias
     }
+
+    
+
+    
 }
 
-
-
-extension FillOp: Equatable, Hashable {
-    public static func ==(lhs: FillOp, rhs: FillOp) -> Bool {
-        if lhs.path != rhs.path {
-            return false
-        }
-        if lhs.transform != rhs.transform {
-            return false
-        }
-        if lhs.paint != rhs.paint {
-            return false
-        }
-        if lhs.opacity != rhs.opacity {
-            return false
-        }
-        if lhs.rule != rhs.rule {
-            return false
-        }
-        if lhs.antialias != rhs.antialias {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(path)
-        hasher.combine(transform)
-        hasher.combine(paint)
-        hasher.combine(opacity)
-        hasher.combine(rule)
-        hasher.combine(antialias)
-    }
-}
-
+#if compiler(>=6)
+extension FillOp: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1247,7 +1226,7 @@ public func FfiConverterTypeFillOp_lower(_ value: FillOp) -> RustBuffer {
 /**
  * An encoded raster `<image>`.
  */
-public struct ImageOp {
+public struct ImageOp: Equatable, Hashable {
     /**
      * The file bytes, still encoded.
      */
@@ -1295,43 +1274,15 @@ public struct ImageOp {
         self.transform = transform
         self.smooth = smooth
     }
+
+    
+
+    
 }
 
-
-
-extension ImageOp: Equatable, Hashable {
-    public static func ==(lhs: ImageOp, rhs: ImageOp) -> Bool {
-        if lhs.data != rhs.data {
-            return false
-        }
-        if lhs.format != rhs.format {
-            return false
-        }
-        if lhs.width != rhs.width {
-            return false
-        }
-        if lhs.height != rhs.height {
-            return false
-        }
-        if lhs.transform != rhs.transform {
-            return false
-        }
-        if lhs.smooth != rhs.smooth {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(data)
-        hasher.combine(format)
-        hasher.combine(width)
-        hasher.combine(height)
-        hasher.combine(transform)
-        hasher.combine(smooth)
-    }
-}
-
+#if compiler(>=6)
+extension ImageOp: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1378,7 +1329,7 @@ public func FfiConverterTypeImageOp_lower(_ value: ImageOp) -> RustBuffer {
 /**
  * A compositing layer.
  */
-public struct Layer {
+public struct Layer: Equatable, Hashable {
     /**
      * Group opacity, `0.0..=1.0`.
      */
@@ -1408,31 +1359,15 @@ public struct Layer {
         self.blend = blend
         self.clips = clips
     }
+
+    
+
+    
 }
 
-
-
-extension Layer: Equatable, Hashable {
-    public static func ==(lhs: Layer, rhs: Layer) -> Bool {
-        if lhs.opacity != rhs.opacity {
-            return false
-        }
-        if lhs.blend != rhs.blend {
-            return false
-        }
-        if lhs.clips != rhs.clips {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(opacity)
-        hasher.combine(blend)
-        hasher.combine(clips)
-    }
-}
-
+#if compiler(>=6)
+extension Layer: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1473,7 +1408,7 @@ public func FfiConverterTypeLayer_lower(_ value: Layer) -> RustBuffer {
 /**
  * A linear gradient in the path's local space, after `transform`.
  */
-public struct LinearGradient {
+public struct LinearGradient: Equatable, Hashable {
     public var x1: Float
     public var y1: Float
     public var x2: Float
@@ -1497,43 +1432,15 @@ public struct LinearGradient {
         self.transform = transform
         self.stops = stops
     }
+
+    
+
+    
 }
 
-
-
-extension LinearGradient: Equatable, Hashable {
-    public static func ==(lhs: LinearGradient, rhs: LinearGradient) -> Bool {
-        if lhs.x1 != rhs.x1 {
-            return false
-        }
-        if lhs.y1 != rhs.y1 {
-            return false
-        }
-        if lhs.x2 != rhs.x2 {
-            return false
-        }
-        if lhs.y2 != rhs.y2 {
-            return false
-        }
-        if lhs.transform != rhs.transform {
-            return false
-        }
-        if lhs.stops != rhs.stops {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(x1)
-        hasher.combine(y1)
-        hasher.combine(x2)
-        hasher.combine(y2)
-        hasher.combine(transform)
-        hasher.combine(stops)
-    }
-}
-
+#if compiler(>=6)
+extension LinearGradient: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1580,7 +1487,7 @@ public func FfiConverterTypeLinearGradient_lower(_ value: LinearGradient) -> Rus
 /**
  * How to parse. `Default` is what the SVG spec calls for, with system fonts.
  */
-public struct ParseOptions {
+public struct ParseOptions: Equatable, Hashable {
     /**
      * Load the system's fonts so `<text>` in a face the document doesn't embed
      * still lays out. Loading is a directory walk done once per process and
@@ -1636,39 +1543,15 @@ public struct ParseOptions {
         self.dpi = dpi
         self.resourcesDir = resourcesDir
     }
+
+    
+
+    
 }
 
-
-
-extension ParseOptions: Equatable, Hashable {
-    public static func ==(lhs: ParseOptions, rhs: ParseOptions) -> Bool {
-        if lhs.loadSystemFonts != rhs.loadSystemFonts {
-            return false
-        }
-        if lhs.fontFamily != rhs.fontFamily {
-            return false
-        }
-        if lhs.fontSize != rhs.fontSize {
-            return false
-        }
-        if lhs.dpi != rhs.dpi {
-            return false
-        }
-        if lhs.resourcesDir != rhs.resourcesDir {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(loadSystemFonts)
-        hasher.combine(fontFamily)
-        hasher.combine(fontSize)
-        hasher.combine(dpi)
-        hasher.combine(resourcesDir)
-    }
-}
-
+#if compiler(>=6)
+extension ParseOptions: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1713,7 +1596,7 @@ public func FfiConverterTypeParseOptions_lower(_ value: ParseOptions) -> RustBuf
 /**
  * A path as verbs, in its local space.
  */
-public struct Path {
+public struct Path: Equatable, Hashable {
     public var verbs: [PathVerb]
 
     // Default memberwise initializers are never public by default, so we
@@ -1721,23 +1604,15 @@ public struct Path {
     public init(verbs: [PathVerb]) {
         self.verbs = verbs
     }
+
+    
+
+    
 }
 
-
-
-extension Path: Equatable, Hashable {
-    public static func ==(lhs: Path, rhs: Path) -> Bool {
-        if lhs.verbs != rhs.verbs {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(verbs)
-    }
-}
-
+#if compiler(>=6)
+extension Path: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1775,7 +1650,7 @@ public func FfiConverterTypePath_lower(_ value: Path) -> RustBuffer {
  * A radial gradient: from the focal point `(fx, fy)` at radius 0 to the
  * circle centred `(cx, cy)` at radius `r`.
  */
-public struct RadialGradient {
+public struct RadialGradient: Equatable, Hashable {
     public var cx: Float
     public var cy: Float
     public var r: Float
@@ -1801,47 +1676,15 @@ public struct RadialGradient {
         self.transform = transform
         self.stops = stops
     }
+
+    
+
+    
 }
 
-
-
-extension RadialGradient: Equatable, Hashable {
-    public static func ==(lhs: RadialGradient, rhs: RadialGradient) -> Bool {
-        if lhs.cx != rhs.cx {
-            return false
-        }
-        if lhs.cy != rhs.cy {
-            return false
-        }
-        if lhs.r != rhs.r {
-            return false
-        }
-        if lhs.fx != rhs.fx {
-            return false
-        }
-        if lhs.fy != rhs.fy {
-            return false
-        }
-        if lhs.transform != rhs.transform {
-            return false
-        }
-        if lhs.stops != rhs.stops {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(cx)
-        hasher.combine(cy)
-        hasher.combine(r)
-        hasher.combine(fx)
-        hasher.combine(fy)
-        hasher.combine(transform)
-        hasher.combine(stops)
-    }
-}
-
+#if compiler(>=6)
+extension RadialGradient: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1890,7 +1733,7 @@ public func FfiConverterTypeRadialGradient_lower(_ value: RadialGradient) -> Rus
 /**
  * Pixels for a subtree that is not expressed as vectors.
  */
-public struct RasterOp {
+public struct RasterOp: Equatable, Hashable {
     /**
      * Premultiplied RGBA, 8 bits per channel, row-major, `width * height * 4`.
      */
@@ -1916,35 +1759,15 @@ public struct RasterOp {
         self.height = height
         self.rect = rect
     }
+
+    
+
+    
 }
 
-
-
-extension RasterOp: Equatable, Hashable {
-    public static func ==(lhs: RasterOp, rhs: RasterOp) -> Bool {
-        if lhs.rgba != rhs.rgba {
-            return false
-        }
-        if lhs.width != rhs.width {
-            return false
-        }
-        if lhs.height != rhs.height {
-            return false
-        }
-        if lhs.rect != rhs.rect {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(rgba)
-        hasher.combine(width)
-        hasher.combine(height)
-        hasher.combine(rect)
-    }
-}
-
+#if compiler(>=6)
+extension RasterOp: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1987,7 +1810,7 @@ public func FfiConverterTypeRasterOp_lower(_ value: RasterOp) -> RustBuffer {
 /**
  * An axis-aligned rectangle in canvas units.
  */
-public struct Rect {
+public struct Rect: Equatable, Hashable {
     public var x: Float
     public var y: Float
     public var width: Float
@@ -2001,35 +1824,15 @@ public struct Rect {
         self.width = width
         self.height = height
     }
+
+    
+
+    
 }
 
-
-
-extension Rect: Equatable, Hashable {
-    public static func ==(lhs: Rect, rhs: Rect) -> Bool {
-        if lhs.x != rhs.x {
-            return false
-        }
-        if lhs.y != rhs.y {
-            return false
-        }
-        if lhs.width != rhs.width {
-            return false
-        }
-        if lhs.height != rhs.height {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(x)
-        hasher.combine(y)
-        hasher.combine(width)
-        hasher.combine(height)
-    }
-}
-
+#if compiler(>=6)
+extension Rect: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -2072,7 +1875,7 @@ public func FfiConverterTypeRect_lower(_ value: Rect) -> RustBuffer {
 /**
  * One gradient stop.
  */
-public struct Stop {
+public struct Stop: Equatable, Hashable {
     /**
      * Position along the gradient, `0.0..=1.0`.
      */
@@ -2096,31 +1899,15 @@ public struct Stop {
         self.color = color
         self.opacity = opacity
     }
+
+    
+
+    
 }
 
-
-
-extension Stop: Equatable, Hashable {
-    public static func ==(lhs: Stop, rhs: Stop) -> Bool {
-        if lhs.offset != rhs.offset {
-            return false
-        }
-        if lhs.color != rhs.color {
-            return false
-        }
-        if lhs.opacity != rhs.opacity {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(offset)
-        hasher.combine(color)
-        hasher.combine(opacity)
-    }
-}
-
+#if compiler(>=6)
+extension Stop: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -2161,7 +1948,7 @@ public func FfiConverterTypeStop_lower(_ value: Stop) -> RustBuffer {
 /**
  * Stroke a path.
  */
-public struct StrokeOp {
+public struct StrokeOp: Equatable, Hashable {
     public var path: Path
     /**
      * Local to canvas. Apply before stroking, so the width is in local units.
@@ -2197,43 +1984,15 @@ public struct StrokeOp {
         self.stroke = stroke
         self.antialias = antialias
     }
+
+    
+
+    
 }
 
-
-
-extension StrokeOp: Equatable, Hashable {
-    public static func ==(lhs: StrokeOp, rhs: StrokeOp) -> Bool {
-        if lhs.path != rhs.path {
-            return false
-        }
-        if lhs.transform != rhs.transform {
-            return false
-        }
-        if lhs.paint != rhs.paint {
-            return false
-        }
-        if lhs.opacity != rhs.opacity {
-            return false
-        }
-        if lhs.stroke != rhs.stroke {
-            return false
-        }
-        if lhs.antialias != rhs.antialias {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(path)
-        hasher.combine(transform)
-        hasher.combine(paint)
-        hasher.combine(opacity)
-        hasher.combine(stroke)
-        hasher.combine(antialias)
-    }
-}
-
+#if compiler(>=6)
+extension StrokeOp: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -2280,7 +2039,7 @@ public func FfiConverterTypeStrokeOp_lower(_ value: StrokeOp) -> RustBuffer {
 /**
  * The pen for a stroke, in the path's local units.
  */
-public struct StrokeStyle {
+public struct StrokeStyle: Equatable, Hashable {
     public var width: Float
     public var cap: LineCap
     public var join: LineJoin
@@ -2296,39 +2055,15 @@ public struct StrokeStyle {
         self.miterLimit = miterLimit
         self.dash = dash
     }
+
+    
+
+    
 }
 
-
-
-extension StrokeStyle: Equatable, Hashable {
-    public static func ==(lhs: StrokeStyle, rhs: StrokeStyle) -> Bool {
-        if lhs.width != rhs.width {
-            return false
-        }
-        if lhs.cap != rhs.cap {
-            return false
-        }
-        if lhs.join != rhs.join {
-            return false
-        }
-        if lhs.miterLimit != rhs.miterLimit {
-            return false
-        }
-        if lhs.dash != rhs.dash {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(width)
-        hasher.combine(cap)
-        hasher.combine(join)
-        hasher.combine(miterLimit)
-        hasher.combine(dash)
-    }
-}
-
+#if compiler(>=6)
+extension StrokeStyle: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -2374,7 +2109,7 @@ public func FfiConverterTypeStrokeStyle_lower(_ value: StrokeStyle) -> RustBuffe
  * A 2D affine transform: `x' = sx·x + kx·y + tx`, `y' = ky·x + sy·y + ty`.
  * `CGAffineTransform(a: sx, b: ky, c: kx, d: sy, tx, ty)` is the same matrix.
  */
-public struct Transform {
+public struct Transform: Equatable, Hashable {
     public var sx: Float
     public var kx: Float
     public var ky: Float
@@ -2392,43 +2127,15 @@ public struct Transform {
         self.tx = tx
         self.ty = ty
     }
+
+    
+
+    
 }
 
-
-
-extension Transform: Equatable, Hashable {
-    public static func ==(lhs: Transform, rhs: Transform) -> Bool {
-        if lhs.sx != rhs.sx {
-            return false
-        }
-        if lhs.kx != rhs.kx {
-            return false
-        }
-        if lhs.ky != rhs.ky {
-            return false
-        }
-        if lhs.sy != rhs.sy {
-            return false
-        }
-        if lhs.tx != rhs.tx {
-            return false
-        }
-        if lhs.ty != rhs.ty {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(sx)
-        hasher.combine(kx)
-        hasher.combine(ky)
-        hasher.combine(sy)
-        hasher.combine(tx)
-        hasher.combine(ty)
-    }
-}
-
+#if compiler(>=6)
+extension Transform: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -2471,13 +2178,12 @@ public func FfiConverterTypeTransform_lower(_ value: Transform) -> RustBuffer {
     return FfiConverterTypeTransform.lower(value)
 }
 
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
 /**
  * `mix-blend-mode`, the sixteen CSS compositing modes.
  */
 
-public enum BlendMode {
+public enum BlendMode: Equatable, Hashable {
     
     case normal
     case multiply
@@ -2495,8 +2201,16 @@ public enum BlendMode {
     case saturation
     case color
     case luminosity
+
+
+
+
+
 }
 
+#if compiler(>=6)
+extension BlendMode: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -2632,22 +2346,24 @@ public func FfiConverterTypeBlendMode_lower(_ value: BlendMode) -> RustBuffer {
 
 
 
-extension BlendMode: Equatable, Hashable {}
-
-
-
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
  * How a path's interior is decided.
  */
 
-public enum FillRule {
+public enum FillRule: Equatable, Hashable {
     
     case nonZero
     case evenOdd
+
+
+
+
+
 }
 
+#if compiler(>=6)
+extension FillRule: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -2699,24 +2415,26 @@ public func FfiConverterTypeFillRule_lower(_ value: FillRule) -> RustBuffer {
 
 
 
-extension FillRule: Equatable, Hashable {}
-
-
-
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
  * The encoding of an image's bytes.
  */
 
-public enum ImageFormat {
+public enum ImageFormat: Equatable, Hashable {
     
     case png
     case jpeg
     case gif
     case webp
+
+
+
+
+
 }
 
+#if compiler(>=6)
+extension ImageFormat: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -2780,23 +2498,25 @@ public func FfiConverterTypeImageFormat_lower(_ value: ImageFormat) -> RustBuffe
 
 
 
-extension ImageFormat: Equatable, Hashable {}
-
-
-
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
  * `stroke-linecap`.
  */
 
-public enum LineCap {
+public enum LineCap: Equatable, Hashable {
     
     case butt
     case round
     case square
+
+
+
+
+
 }
 
+#if compiler(>=6)
+extension LineCap: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -2854,24 +2574,26 @@ public func FfiConverterTypeLineCap_lower(_ value: LineCap) -> RustBuffer {
 
 
 
-extension LineCap: Equatable, Hashable {}
-
-
-
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
  * `stroke-linejoin`. A backend without `MiterClip` falls back to `Miter`.
  */
 
-public enum LineJoin {
+public enum LineJoin: Equatable, Hashable {
     
     case miter
     case miterClip
     case round
     case bevel
+
+
+
+
+
 }
 
+#if compiler(>=6)
+extension LineJoin: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -2935,17 +2657,11 @@ public func FfiConverterTypeLineJoin_lower(_ value: LineJoin) -> RustBuffer {
 
 
 
-extension LineJoin: Equatable, Hashable {}
-
-
-
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
  * One drawing operation.
  */
 
-public enum Op {
+public enum Op: Equatable, Hashable {
     
     /**
      * Begin a compositing layer, ended by the matching `PopLayer`.
@@ -2976,8 +2692,16 @@ public enum Op {
      */
     case raster(op: RasterOp
     )
+
+
+
+
+
 }
 
+#if compiler(>=6)
+extension Op: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -3063,17 +2787,11 @@ public func FfiConverterTypeOp_lower(_ value: Op) -> RustBuffer {
 
 
 
-extension Op: Equatable, Hashable {}
-
-
-
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
  * What a fill or stroke is painted with.
  */
 
-public enum Paint {
+public enum Paint: Equatable, Hashable {
     
     case solid(color: Color
     )
@@ -3081,8 +2799,16 @@ public enum Paint {
     )
     case radial(gradient: RadialGradient
     )
+
+
+
+
+
 }
 
+#if compiler(>=6)
+extension Paint: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -3146,17 +2872,11 @@ public func FfiConverterTypePaint_lower(_ value: Paint) -> RustBuffer {
 
 
 
-extension Paint: Equatable, Hashable {}
-
-
-
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
  * One path verb. Coordinates are absolute in the path's local space.
  */
 
-public enum PathVerb {
+public enum PathVerb: Equatable, Hashable {
     
     case moveTo(x: Float, y: Float
     )
@@ -3167,8 +2887,16 @@ public enum PathVerb {
     case cubicTo(x1: Float, y1: Float, x2: Float, y2: Float, x: Float, y: Float
     )
     case close
+
+
+
+
+
 }
 
+#if compiler(>=6)
+extension PathVerb: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -3256,15 +2984,11 @@ public func FfiConverterTypePathVerb_lower(_ value: PathVerb) -> RustBuffer {
 
 
 
-extension PathVerb: Equatable, Hashable {}
-
-
-
-
 /**
  * Why [`SvgDocument::new`] refused the bytes.
  */
-public enum SvgError {
+public 
+enum SvgError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
     
     
@@ -3273,8 +2997,21 @@ public enum SvgError {
      */
     case Parse(message: String
     )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
 }
 
+#if compiler(>=6)
+extension SvgError: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -3313,12 +3050,18 @@ public struct FfiConverterTypeSvgError: FfiConverterRustBuffer {
 }
 
 
-extension SvgError: Equatable, Hashable {}
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSvgError_lift(_ buf: RustBuffer) throws -> SvgError {
+    return try FfiConverterTypeSvgError.lift(buf)
+}
 
-extension SvgError: Foundation.LocalizedError {
-    public var errorDescription: String? {
-        String(reflecting: self)
-    }
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSvgError_lower(_ value: SvgError) -> RustBuffer {
+    return FfiConverterTypeSvgError.lower(value)
 }
 
 #if swift(>=5.8)
@@ -3526,34 +3269,36 @@ private enum InitializationResult {
 }
 // Use a global variable to perform the versioning checks. Swift ensures that
 // the code inside is only computed once.
-private var initializationResult: InitializationResult = {
+private let initializationResult: InitializationResult = {
     // Get the bindings contract version from our ComponentInterface
-    let bindings_contract_version = 26
+    let bindings_contract_version = 30
     // Get the scaffolding contract version by calling the into the dylib
     let scaffolding_contract_version = ffi_resvg_uniffi_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_resvg_uniffi_checksum_method_svgdocument_display_list() != 25484) {
+    if (uniffi_resvg_uniffi_checksum_method_svgdocument_display_list() != 48928) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_resvg_uniffi_checksum_method_svgdocument_has_text() != 17336) {
+    if (uniffi_resvg_uniffi_checksum_method_svgdocument_has_text() != 32305) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_resvg_uniffi_checksum_method_svgdocument_height() != 42934) {
+    if (uniffi_resvg_uniffi_checksum_method_svgdocument_height() != 39680) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_resvg_uniffi_checksum_method_svgdocument_width() != 16624) {
+    if (uniffi_resvg_uniffi_checksum_method_svgdocument_width() != 43462) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_resvg_uniffi_checksum_constructor_svgdocument_new() != 20232) {
+    if (uniffi_resvg_uniffi_checksum_constructor_svgdocument_new() != 47558) {
         return InitializationResult.apiChecksumMismatch
     }
 
     return InitializationResult.ok
 }()
 
-private func uniffiEnsureInitialized() {
+// Make the ensure init function public so that other modules which have external type references to
+// our types can call it.
+public func uniffiEnsureResvgUniffiInitialized() {
     switch initializationResult {
     case .ok:
         break

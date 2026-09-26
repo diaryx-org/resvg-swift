@@ -3,7 +3,7 @@
 //!
 //! ```sh
 //! cargo run -p resvg-uniffi --bin uniffi-bindgen -- \
-//!   generate --library <libresvg_uniffi.dylib> --language swift --out-dir <dir>
+//!   generate <libresvg_uniffi.dylib> --language swift --out-dir <dir>
 //! ```
 fn main() {
     uniffi::uniffi_bindgen_main()

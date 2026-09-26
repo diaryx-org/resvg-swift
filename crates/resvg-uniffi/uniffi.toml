@@ -1,0 +1,8 @@
+# UniFFI binding config, read by uniffi-bindgen for this crate wherever its
+# library is generated from — this repository's Swift, or a host's Kotlin.
+
+# Kotlin's generated exception classes already have a `message` (Throwable's),
+# so a variant field of that name is declared twice and the binding does not
+# compile. Kotlin alone calls it `reason`; Swift keeps `message`.
+[bindings.kotlin.rename]
+"SvgError.Parse.message" = "reason"

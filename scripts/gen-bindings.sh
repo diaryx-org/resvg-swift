@@ -33,7 +33,7 @@ mkdir -p "$STAGE/out/Sources/ResvgFFI" "$STAGE/out/headers"
 # --no-format: the committed output must not depend on whether this machine
 # happens to have swiftformat on PATH — CI's runner never does.
 cargo run -q --manifest-path "$ROOT/Cargo.toml" -p resvg-uniffi --bin uniffi-bindgen -- \
-  generate --library "$LIB" --language swift --no-format --out-dir "$STAGE/gen"
+  generate "$LIB" --language swift --no-format --out-dir "$STAGE/gen"
 mv "$STAGE/gen/resvg_uniffi.swift" "$STAGE/out/Sources/ResvgFFI/resvg_uniffi.swift"
 cp "$STAGE/gen/resvg_uniffiFFI.h" "$STAGE/out/headers/"
 cp "$STAGE/gen/resvg_uniffiFFI.modulemap" "$STAGE/out/headers/module.modulemap"

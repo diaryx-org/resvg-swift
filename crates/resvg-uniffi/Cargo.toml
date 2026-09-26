@@ -11,7 +11,7 @@ keywords = ["svg", "resvg", "swift", "uniffi", "coregraphics"]
 categories = ["rendering", "external-ffi-bindings"]
 
 # staticlib -> the .a a host force-loads (alongside its own FFI crate).
-# cdylib    -> a .dylib for `uniffi-bindgen --library` to introspect, and for
+# cdylib    -> a .dylib for `uniffi-bindgen` to introspect, and for
 #              the Swift tests to link.
 # lib       -> lets a host's own FFI crate depend on this one, so that the
 #              scaffolding lands in the host's single staticlib.
@@ -19,7 +19,7 @@ categories = ["rendering", "external-ffi-bindings"]
 crate-type = ["staticlib", "cdylib", "lib"]
 
 # The bindings generator. `scripts/gen-bindings.sh` runs it as
-#   cargo run -p resvg-uniffi --bin uniffi-bindgen -- generate --library …
+#   cargo run -p resvg-uniffi --bin uniffi-bindgen -- generate <the cdylib> …
 # Kept in-tree so the generator version can never drift from the `uniffi`
 # runtime this crate links.
 [[bin]]
@@ -32,5 +32,5 @@ usvg.workspace = true
 # The FFI machinery, proc-macro mode (no .udl file). `cli` pulls in
 # `uniffi_bindgen_main` for the bin target above. Same version as leaf-ffi and
 # flower-ffi: a host links exactly one uniffi runtime.
-uniffi = { version = "0.28", features = ["cli"] }
+uniffi = { version = "0.32", features = ["cli"] }
 thiserror = "1"
