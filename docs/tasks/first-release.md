@@ -2,12 +2,16 @@
 title: First release
 description: What stands between this checkout and a 0.1.0 leaf can pin — the repo, the token, the number
 author: adammharris
-status: open
+status: done
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-10-03
 part_of: '[Tasks](tasks.md)'
 ---
 # First release
+
+> **Done.** 0.1.0 through 0.1.4 went to crates.io, and leaf took the pin. As
+> of 2026-10-03 resvg-swift no longer publishes: leaf and thorn depend on
+> `resvg-uniffi` from git.
 
 What stands between this checkout and a `0.1.0` that leaf can pin:
 
