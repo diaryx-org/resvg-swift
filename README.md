@@ -101,7 +101,7 @@ pixels back — the y-direction of images and the composition of group opacity
 are the two things a CoreGraphics backend gets wrong first, and both are
 asserted.
 
-Releases are `dx release` from the org's devtools, configured in
+Releases are `release` from the org's devtools, configured in
 `.config/release.toml`. Neither crate is on crates.io: leaf and thorn depend on
 `resvg-uniffi` from git, `{ git = "https://github.com/diaryx-org/resvg-swift",
 branch = "main" }`, and lock the commit they build. 0.1.4 was the last upload.

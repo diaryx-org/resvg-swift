@@ -2,7 +2,7 @@
 //! invoked as `cargo xtask <task>` through the alias in `.cargo/config.toml`, so
 //! every developer already has the only toolchain it needs.
 //!
-//! Releasing is not here. It is `dx release`, from the org's devtools,
+//! Releasing is not here. It is `release`, from the org's devtools,
 //! configured by `.config/release.toml`.
 //!
 //! [cargo-xtask]: https://github.com/matklad/cargo-xtask

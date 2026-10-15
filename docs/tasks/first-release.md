@@ -19,8 +19,8 @@ What stands between this checkout and a `0.1.0` that leaf can pin:
   this checkout pushed to it.
 - The `CARGO_REGISTRY_TOKEN` secret on the repo, with `publish-new` scope —
   both crates are new to crates.io. `publish.yml` names it.
-- The version. `dx release` with no spec proposes; the number is Adam's.
-- Then `dx release <spec>` cuts bump, changelog, commit, and tag, and the tag
+- The version. `release` with no spec proposes; the number is Adam's.
+- Then `release <spec>` cuts bump, changelog, commit, and tag, and the tag
   push runs `publish.yml`.
 
 After that, leaf's task (`leaf/docs/tasks/closed/svg-through-resvg-swift.md`) can
