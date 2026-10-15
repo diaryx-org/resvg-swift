@@ -12,4 +12,4 @@ contents:
 # Tasks
 
 Deferred work, one file each, per the org's model (`status` is one of `open`,
-`in-progress`, `done`, `dropped`). `dx tasks resvg-swift` is the open list.
+`in-progress`, `done`, `dropped`). `org tasks resvg-swift` is the open list.
