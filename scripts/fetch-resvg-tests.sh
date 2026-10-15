@@ -26,5 +26,12 @@ echo "▸ Fetching resvg v$VERSION test suite…" >&2
 git clone -q --depth 1 --branch "v$VERSION" --filter=blob:none --sparse \
   https://github.com/linebender/resvg "$DEST" >/dev/null 2>&1
 git -C "$DEST" sparse-checkout set crates/resvg/tests >/dev/null
+# The stamp is what the test takes as a fetched suite, so it is written only
+# over one that is all there.
+COUNT="$(find "$DEST/crates/resvg/tests/tests" -name '*.svg' | wc -l | tr -d ' ')"
+[ "$COUNT" -gt 1000 ] || {
+  echo "fetch-resvg-tests: resvg v$VERSION checkout has $COUNT SVGs under crates/resvg/tests/tests" >&2
+  exit 1
+}
 echo "$VERSION" > "$STAMP"
 echo "$DEST/crates/resvg/tests"

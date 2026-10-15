@@ -9,7 +9,8 @@
 //!
 //! The suite is fetched by `scripts/fetch-resvg-tests.sh` into
 //! `target/resvg-tests/` at the pinned resvg version; `ship ci suite`
-//! does both. Without it this test passes trivially with a note, so a plain
+//! does both, and the script's `.version` stamp is what says a fetch finished.
+//! Without it this test passes trivially with a note, so a plain
 //! `cargo test` needs no network; set `RESVG_SUITE_REQUIRED=1` to make its
 //! absence a failure, which CI does.
 //!
@@ -41,9 +42,14 @@ fn suite_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("RESVG_SUITE_DIR") {
         return Some(PathBuf::from(dir));
     }
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let dir = root.join("target/resvg-tests/crates/resvg/tests");
-    dir.is_dir().then_some(dir)
+    // The fetch script writes `.version` last, so it marks a whole fetch. The
+    // directory alone does not: CI's target cache keeps `target/`'s directories
+    // and drops their files, which restores an empty suite.
+    let fetched = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/resvg-tests");
+    fetched
+        .join(".version")
+        .is_file()
+        .then(|| fetched.join("crates/resvg/tests"))
 }
 
 fn fontdb(suite: &Path) -> Arc<usvg::fontdb::Database> {
