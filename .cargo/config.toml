@@ -1,4 +1,4 @@
-# `cargo xtask <task>` — the workspace task runner (xtask/). `ci` is the checks a
-# release has to pass; `cargo xtask --help` lists the rest.
+# `cargo xtask <task>` — the workspace task runner (xtask/). CI is `ship ci`; these
+# are the tasks its jobs call. `cargo xtask --help` lists them.
 [alias]
 xtask = "run --quiet --package xtask --"

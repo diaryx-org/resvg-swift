@@ -1,11 +1,11 @@
 name: CI
-# `cargo xtask ci` is the definition of green; this file only decides where it
-# runs. The Rust jobs run on Linux — the committed UniFFI binding is arch-neutral
-# source, so its drift check needs no Mac. Its last job fetches resvg's test
-# suite (a 24 MB sparse clone of the resvg repo at the pinned tag) and renders
-# all ~1,700 cases both ways; that is the one network access. The Swift package
-# needs a Mac, so its tests run on a macOS runner against the staticlib the
-# script builds.
+# The `job` list in .config/ship.figl is the definition of green, and `ship ci`
+# runs it; this file only decides where. The Rust jobs run on Linux — the
+# committed UniFFI binding is arch-neutral source, so its drift check needs no
+# Mac. Its last job fetches resvg's test suite (a 24 MB sparse clone of the
+# resvg repo at the pinned tag) and renders all ~1,700 cases both ways; that is
+# the one network access. The Swift package needs a Mac, so its tests run on a
+# macOS runner against the staticlib the script builds.
 on:
   push: { branches: [main] }
   pull_request: null
@@ -20,6 +20,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # All of ship.figl's jobs, in order, on one runner. The name is older than
+  # ship: it is a required status check, so it stays `CI / cargo xtask ci`.
   rust:
     name: cargo xtask ci
     runs-on: ubuntu-latest
@@ -27,8 +29,10 @@ jobs:
     - uses: actions/checkout@v7
     # rust-toolchain.toml names the toolchain; rustup installs it on first use.
     - uses: Swatinem/rust-cache@v2
-    - run: cargo xtask ci
+    - run: cargo install --locked --git https://github.com/diaryx-org/ship ship
+    - run: ship ci
 
+  # Not a ship.figl job: it needs a Mac, and `ship ci` runs anywhere.
   swift:
     name: Swift package tests
     runs-on: macos-latest

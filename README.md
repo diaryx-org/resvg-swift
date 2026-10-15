@@ -81,8 +81,8 @@ Both Swift products are then `.package(url: "https://github.com/diaryx-org/resvg
 ## Developing
 
 ```sh
-cargo xtask ci              # fmt, clippy, tests, per-crate check, binding drift, resvg suite
-cargo xtask ci suite        # just the resvg suite (fetches it into target/ once)
+ship ci                     # fmt, clippy, tests, per-crate check, binding drift, resvg suite
+ship ci suite               # just the resvg suite (fetches it into target/ once)
 scripts/gen-bindings.sh     # after changing crates/resvg-uniffi's surface
 scripts/test-swift.sh       # the CoreGraphics tests, on a Mac
 ```
@@ -93,7 +93,7 @@ case per feature at a fractional scale; `resvg_suite.rs` is **resvg's own test
 suite** — every SVG resvg tests itself with, fetched at the pinned version —
 through both. At resvg 0.46.0 that is 1,697 cases compared, 1,676 bit-for-bit
 identical, the remaining 21 within a few levels on under 2% of their pixels,
-and an empty allowlist. `cargo xtask ci suite` runs it; the other jobs don't
+and an empty allowlist. `ship ci suite` runs it; the other jobs don't
 need the network.
 
 The Swift tests draw through the real binding into bitmap contexts and read
@@ -101,8 +101,8 @@ pixels back — the y-direction of images and the composition of group opacity
 are the two things a CoreGraphics backend gets wrong first, and both are
 asserted.
 
-Releases are `release` from the org's devtools, configured in
-`.config/release.toml`. Neither crate is on crates.io: leaf and thorn depend on
+Releases are `ship`, configured in `.config/ship.figl`, which also holds
+the CI jobs. Neither crate is on crates.io: leaf and thorn depend on
 `resvg-uniffi` from git, `{ git = "https://github.com/diaryx-org/resvg-swift",
 branch = "main" }`, and lock the commit they build. 0.1.4 was the last upload.
 

@@ -8,7 +8,7 @@
 //! on.
 //!
 //! The suite is fetched by `scripts/fetch-resvg-tests.sh` into
-//! `target/resvg-tests/` at the pinned resvg version; `cargo xtask ci suite`
+//! `target/resvg-tests/` at the pinned resvg version; `ship ci suite`
 //! does both. Without it this test passes trivially with a note, so a plain
 //! `cargo test` needs no network; set `RESVG_SUITE_REQUIRED=1` to make its
 //! absence a failure, which CI does.

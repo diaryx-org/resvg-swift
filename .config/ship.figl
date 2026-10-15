@@ -1,0 +1,62 @@
+# What ship needs to know about resvg-swift: its release, and its CI. Everything
+# not stated here is ship's default — the manifest, the changelog path, the cliff
+# config, and that this is a Cargo workspace.
+name = resvg-swift
+url = https://github.com/diaryx-org/resvg-swift
+release_branch = main
+
+# No `verify`: before cutting, a release runs the jobs below.
+
+# Not on crates.io: resvg-swift is consumed from git, by commit, so a tag is a name
+# for a commit.
+publishes = false
+
+# CI. `ship ci` runs these here, in this order, with the same shell, and stops
+# at the first that fails; `.github/workflows/ci.yml` runs the same `ship ci` as
+# its one Linux check, `CI / cargo xtask ci` (a required status check, so its
+# name outlived the command). The Swift package tests are not here: they need a
+# Mac, and are that workflow's other job.
+#
+# A job is `id` (what `ship ci <id>` takes), `name` (the heading a full run
+# prints) and `run` (run by `bash -eo pipefail -c` at the repository root).
+# Cheapest and most likely to fail first.
+job
+> *
+> > id = fmt
+> > name = Format
+> > run = cargo fmt --all --check
+> *
+> > # Warnings are errors here because they are errors in review.
+> > id = clippy
+> > name = Clippy
+> > run = cargo clippy --workspace --all-targets -- -D warnings
+> *
+> > id = test
+> > name = Test
+> > run = cargo test --workspace
+> *
+> > # Workspace feature unification means `cargo check --workspace` can pass
+> > # when a crate cannot compile on its own, so each crate is checked the way a
+> > # host builds it. The list, and the test that every workspace member is on
+> > # it, are in the xtask.
+> > id = package-isolation
+> > name = Package isolation
+> > run = cargo xtask package-isolation
+> *
+> > # The committed UniFFI binding is what crates/resvg-uniffi produces. It is
+> > # arch-neutral source, so the drift check needs no Mac.
+> > id = bindings
+> > name = Swift bindings
+> > run = bash scripts/gen-bindings.sh --check
+> *
+> > # Every SVG resvg tests itself with renders the same through flatten. Last
+> > # because it is the slow one — a 24 MB sparse clone of resvg at the pinned tag
+> > # the first time, then ~1,700 renders twice over — and the fast jobs catch
+> > # most things. `--release`: the debug build takes three times as long for no
+> > # more information.
+> > id = suite
+> > name = resvg test suite
+> > run = '''
+bash scripts/fetch-resvg-tests.sh
+RESVG_SUITE_REQUIRED=1 cargo test --release -p usvg-flatten --test resvg_suite -- --nocapture
+'''

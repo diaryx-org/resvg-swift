@@ -3,7 +3,7 @@
 # Fetch resvg's own test suite — ~1,700 SVGs with reference renders — at the
 # exact resvg version this workspace pins, into target/resvg-tests/. The suite
 # lives in the resvg repository, not in the crates.io package, and it is 24 MB,
-# so it is fetched rather than vendored; `cargo xtask ci suite` calls this and
+# so it is fetched rather than vendored; `ship ci suite` calls this and
 # then runs crates/usvg-flatten/tests/resvg_suite.rs over it.
 #
 # Usage: scripts/fetch-resvg-tests.sh   (prints the suite directory)
