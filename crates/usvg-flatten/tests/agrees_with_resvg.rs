@@ -236,7 +236,7 @@ fn radial_gradient_with_focal_point() {
 }
 
 #[test]
-fn repeating_gradient_falls_back_to_raster() {
+fn repeating_gradient_stays_vector() {
     let list = agree(
         "repeat_gradient",
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
@@ -247,7 +247,61 @@ fn repeating_gradient_falls_back_to_raster() {
               <rect width="40" height="40" fill="url(#g)"/>
             </svg>"##,
     );
-    assert!(matches!(&list.ops[..], [Op::Raster(_)]));
+    assert!(matches!(&list.ops[..], [Op::Fill(op)] if matches!(op.paint, Paint::Linear(_))));
+}
+
+#[test]
+fn reflecting_gradient_stays_vector() {
+    // Stops short of both ends, so each tile pads inside itself, and a
+    // gradient transform, so the tiles are counted in the gradient's space.
+    let list = agree(
+        "reflect_gradient",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+              <linearGradient id="g" x1="0.4" y1="0" x2="0.6" y2="0.1" spreadMethod="reflect"
+                              gradientTransform="rotate(30 0.5 0.5)">
+                <stop offset="0.2" stop-color="#f00"/>
+                <stop offset="0.5" stop-color="#0f0" stop-opacity="0.4"/>
+                <stop offset="0.8" stop-color="#00f"/>
+              </linearGradient>
+              <rect x="2" y="3" width="35" height="33" fill="url(#g)"/>
+            </svg>"##,
+    );
+    assert!(matches!(&list.ops[..], [Op::Fill(op)] if matches!(op.paint, Paint::Linear(_))));
+}
+
+#[test]
+fn repeating_radial_gradient_stays_vector() {
+    let list = agree(
+        "repeat_radial_gradient",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+              <radialGradient id="g" cx="0.5" cy="0.5" r="0.15" fx="0.45" fy="0.42"
+                              spreadMethod="repeat">
+                <stop offset="0" stop-color="#fff"/>
+                <stop offset="1" stop-color="#204080"/>
+              </radialGradient>
+              <rect width="40" height="40" fill="url(#g)"/>
+            </svg>"##,
+    );
+    assert!(matches!(&list.ops[..], [Op::Fill(op)] if matches!(op.paint, Paint::Radial(_))));
+}
+
+#[test]
+fn reflecting_gradient_on_a_stroke_covers_the_stroke() {
+    // userSpaceOnUse, so the gradient is short against the stroke, which
+    // reaches past the path's own box.
+    let list = agree(
+        "reflect_radial_stroke",
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+              <radialGradient id="g" gradientUnits="userSpaceOnUse" cx="20" cy="20" r="4"
+                              fx="19" fy="21" spreadMethod="reflect">
+                <stop offset="0" stop-color="#f80"/>
+                <stop offset="1" stop-color="#08f"/>
+              </radialGradient>
+              <rect x="10" y="10" width="20" height="20" fill="none" stroke="url(#g)"
+                    stroke-width="8"/>
+            </svg>"##,
+    );
+    assert!(matches!(&list.ops[..], [Op::Stroke(op)] if matches!(op.paint, Paint::Radial(_))));
 }
 
 #[test]

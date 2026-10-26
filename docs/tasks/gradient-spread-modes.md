@@ -2,12 +2,22 @@
 title: Reflect and repeat gradient spreads
 description: reflect/repeat gradients rasterize the path because CGGradient only pads; tiling the stops keeps them vector
 author: adammharris
-status: open
+status: done
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-10-25
 part_of: '[Tasks](tasks.md)'
 ---
 # Reflect and repeat gradient spreads
+
+> **Done** (2026-10-25), by option 1. `flatten` tiles a `reflect` or `repeat`
+> gradient's stops over the bounding box of what it paints (the stroke's, for a
+> stroke), plus one tile each side for the anti-aliased edge, and emits a pad
+> gradient. A tile is closed with its end colours, so stops short of 0 or 1 pad
+> inside it. Two cases still rasterize: a radial gradient whose focal point is
+> not strictly inside its circle (some points then have no position on it), and
+> one that would take more than 256 tiles. `repeating_gradient_stays_vector`
+> (the test this task named) and three more cases in `agrees_with_resvg.rs`
+> hold it to resvg's pixels, as does resvg's own suite.
 
 `spreadMethod="reflect"` and `"repeat"` rasterize the whole path today, because
 `CGGradient` only pads. Two ways forward, either of which keeps the path

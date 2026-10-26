@@ -15,8 +15,10 @@ usvg has already done the hard part by the time the walker runs — CSS, `<use>`
 units, `<text>` laid out into glyph paths — so what is left is a tree of paths,
 groups, and paints. Everything a vector API has a primitive for stays vector:
 paths with solid or gradient paint, strokes with dashes, group opacity, blend
-modes, and clip paths. What it does not — filters, masks, pattern paint, and
-gradients with `reflect`/`repeat` spread — is rendered by `resvg` at
+modes, and clip paths. A gradient with `reflect`/`repeat` spread
+arrives as a pad gradient whose stops are tiled over what it paints. What it
+does not — filters, masks, pattern paint, and the rare repeating gradient that
+cannot be tiled out — is rendered by `resvg` at
 `raster_scale` device pixels per user unit and emitted as one `Raster` op. A
 consumer that redraws at a new size re-flattens with a new scale; nothing else
 changes.

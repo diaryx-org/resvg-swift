@@ -111,10 +111,14 @@ impl Walker {
         // path never ends up half vector, half raster.
         let fill_paint = path
             .fill()
-            .map(|fill| paint(fill.paint(), fill.opacity().get()));
-        let stroke_paint = path
-            .stroke()
-            .map(|stroke| paint(stroke.paint(), stroke.opacity().get()));
+            .map(|fill| paint(fill.paint(), fill.opacity().get(), path.bounding_box()));
+        let stroke_paint = path.stroke().map(|stroke| {
+            paint(
+                stroke.paint(),
+                stroke.opacity().get(),
+                path.stroke_bounding_box(),
+            )
+        });
         if matches!(fill_paint, Some(None)) || matches!(stroke_paint, Some(None)) {
             return self.raster(node, ts);
         }
@@ -260,39 +264,179 @@ fn clip_shapes(group: &usvg::Group, ts: tsp::Transform, out: &mut Vec<ClipShape>
 }
 
 /// A usvg paint as a [`Paint`], or `None` for one this list cannot carry — a
-/// pattern, or a gradient that repeats or reflects past its stops.
-fn paint(paint: &usvg::Paint, opacity: f32) -> Option<Paint> {
+/// pattern, or a gradient that repeats or reflects past its stops and cannot be
+/// tiled out (see [`spread`]).
+///
+/// `bounds` is what the paint covers, in the path's local space: the fill's
+/// bounding box, or the stroke's.
+fn paint(paint: &usvg::Paint, opacity: f32, bounds: tsp::Rect) -> Option<Paint> {
     Some(match paint {
         usvg::Paint::Color(c) => Paint::Solid(color(*c)),
         usvg::Paint::LinearGradient(g) => {
-            if g.spread_method() != usvg::SpreadMethod::Pad {
-                return None;
+            let (mut x1, mut y1, mut x2, mut y2) = (g.x1(), g.y1(), g.x2(), g.y2());
+            let mut stops = stops(g.stops(), opacity);
+            if let Some(reflect) = spread(g.spread_method()) {
+                let (dx, dy) = (x2 - x1, y2 - y1);
+                let length = dx * dx + dy * dy;
+                if length.is_nan() || length <= 0.0 {
+                    return None;
+                }
+                // Linear in the point, so its extremes over the box are at
+                // corners.
+                let along = |p: tsp::Point| ((p.x - x1) * dx + (p.y - y1) * dy) / length;
+                let ts = corners(bounds, g.transform())?.map(along);
+                let (lo, hi) = ts
+                    .iter()
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &t| {
+                        (lo.min(t), hi.max(t))
+                    });
+                let (first, last) = tile_span(lo, hi)?;
+                stops = tile(&stops, first, last, reflect);
+                (x1, y1, x2, y2) = (
+                    x1 + first as f32 * dx,
+                    y1 + first as f32 * dy,
+                    x1 + last as f32 * dx,
+                    y1 + last as f32 * dy,
+                );
             }
             Paint::Linear(LinearGradient {
-                x1: g.x1(),
-                y1: g.y1(),
-                x2: g.x2(),
-                y2: g.y2(),
+                x1,
+                y1,
+                x2,
+                y2,
                 transform: transform(g.transform()),
-                stops: stops(g.stops(), opacity),
+                stops,
             })
         }
         usvg::Paint::RadialGradient(g) => {
-            if g.spread_method() != usvg::SpreadMethod::Pad {
-                return None;
+            let (mut cx, mut cy, mut r) = (g.cx(), g.cy(), g.r().get());
+            let (fx, fy) = (g.fx(), g.fy());
+            let mut stops = stops(g.stops(), opacity);
+            if let Some(reflect) = spread(g.spread_method()) {
+                // The circle at `t` is centred `f + t·d` with radius `t·r`. With
+                // the focal point strictly inside the end circle every point
+                // has one `t ≥ 0`, and the points at or under a `t` form a disc,
+                // so its greatest over the box is at a corner. Any other focal
+                // point leaves some points without a `t`; those rasterize.
+                let (dx, dy) = (cx - fx, cy - fy);
+                let a = dx * dx + dy * dy - r * r;
+                if a.is_nan() || a >= 0.0 {
+                    return None;
+                }
+                let radius = |p: tsp::Point| {
+                    let (qx, qy) = (p.x - fx, p.y - fy);
+                    let b = qx * dx + qy * dy;
+                    (b - (b * b - a * (qx * qx + qy * qy)).sqrt()) / a
+                };
+                let ts = corners(bounds, g.transform())?.map(radius);
+                let hi = ts.iter().copied().fold(0.0, f32::max);
+                // It starts at the focal point: there is no tile before 0.
+                let (_, last) = tile_span(0.0, hi)?;
+                stops = tile(&stops, 0, last, reflect);
+                let n = last as f32;
+                (cx, cy, r) = (fx + n * dx, fy + n * dy, n * r);
             }
             Paint::Radial(RadialGradient {
-                cx: g.cx(),
-                cy: g.cy(),
-                r: g.r().get(),
-                fx: g.fx(),
-                fy: g.fy(),
+                cx,
+                cy,
+                r,
+                fx,
+                fy,
                 transform: transform(g.transform()),
-                stops: stops(g.stops(), opacity),
+                stops,
             })
         }
         usvg::Paint::Pattern(_) => return None,
     })
+}
+
+/// The most tiles a repeating or reflecting gradient is expanded to. Past it a
+/// tile is a sliver of the path, and the path rasterizes instead.
+const MAX_TILES: i32 = 256;
+
+/// `None` for a gradient that pads, which the list carries as it is;
+/// otherwise whether every other tile runs backwards.
+///
+/// [`Paint`] gradients only pad, because Core Graphics' only pad. A gradient
+/// that repeats or reflects is carried as a padding one whose stops are its own
+/// laid end to end — reversed every other time for `reflect` — over as many
+/// tiles as it takes to cover what it paints. Exact, since a padding gradient
+/// is never asked for a colour past its ends.
+fn spread(method: usvg::SpreadMethod) -> Option<bool> {
+    match method {
+        usvg::SpreadMethod::Pad => None,
+        usvg::SpreadMethod::Repeat => Some(false),
+        usvg::SpreadMethod::Reflect => Some(true),
+    }
+}
+
+/// `bounds`' corners, in the space of a gradient drawn under `ts`.
+fn corners(bounds: tsp::Rect, ts: tsp::Transform) -> Option<[tsp::Point; 4]> {
+    let mut points = [
+        tsp::Point::from_xy(bounds.left(), bounds.top()),
+        tsp::Point::from_xy(bounds.right(), bounds.top()),
+        tsp::Point::from_xy(bounds.right(), bounds.bottom()),
+        tsp::Point::from_xy(bounds.left(), bounds.bottom()),
+    ];
+    ts.invert()?.map_points(&mut points);
+    Some(points)
+}
+
+/// The whole tiles `first..last` that cover gradient positions `lo..=hi`, with
+/// one more at each end for the anti-aliased edge just outside the bounds.
+/// `None` past [`MAX_TILES`], or if either end is not finite.
+fn tile_span(lo: f32, hi: f32) -> Option<(i32, i32)> {
+    let (first, last) = (lo.floor() - 1.0, hi.ceil() + 1.0);
+    if !(first.is_finite() && last.is_finite() && last - first <= MAX_TILES as f32) {
+        return None;
+    }
+    Some((first as i32, last as i32))
+}
+
+/// `stops` repeated over tiles `first..last`, scaled into `0.0..=1.0`, each
+/// tile reversed when `reflect` and its index is odd.
+///
+/// Each tile is closed at both ends with its end colours, so that a gradient
+/// whose stops start past 0 or end short of 1 keeps padding within the tile,
+/// and the seam between two tiles is a hard edge where it is one.
+fn tile(stops: &[Stop], first: i32, last: i32, reflect: bool) -> Vec<Stop> {
+    let (Some(&head), Some(&tail)) = (stops.first(), stops.last()) else {
+        return Vec::new();
+    };
+    let mut one = Vec::with_capacity(stops.len() + 2);
+    one.push(Stop {
+        offset: 0.0,
+        ..head
+    });
+    one.extend_from_slice(stops);
+    one.push(Stop {
+        offset: 1.0,
+        ..tail
+    });
+
+    let n = (last - first) as f32;
+    let mut out = Vec::with_capacity(one.len() * (last - first) as usize);
+    for k in first..last {
+        let base = (k - first) as f32;
+        let backwards = reflect && k.rem_euclid(2) == 1;
+        let stop = |stop: &Stop| {
+            let offset = if backwards {
+                1.0 - stop.offset
+            } else {
+                stop.offset
+            };
+            Stop {
+                offset: ((base + offset) / n).min(1.0),
+                ..*stop
+            }
+        };
+        if backwards {
+            out.extend(one.iter().rev().map(stop));
+        } else {
+            out.extend(one.iter().map(stop));
+        }
+    }
+    out
 }
 
 /// Stops with the op's opacity folded in, as resvg's `convert_base_gradient`

@@ -16,15 +16,17 @@
 //!
 //! ## What stays vector, and what does not
 //!
-//! Vector: paths filled or stroked with a solid colour or a pad-spread linear or
-//! radial gradient; strokes with caps, joins, miter limit, and dashes; group
+//! Vector: paths filled or stroked with a solid colour or a linear or radial
+//! gradient — one that reflects or repeats arrives padding, with its stops tiled
+//! over the path; strokes with caps, joins, miter limit, and dashes; group
 //! opacity and blend mode; clip paths (as unions of shapes, intersected in
 //! sequence); embedded raster images by their encoded bytes; nested SVG images
 //! by recursion.
 //!
 //! Raster, through resvg at [`Options::raster_scale`]: any group with a filter
-//! or a mask, any path painted with a pattern or a `reflect`/`repeat` gradient,
-//! and any clip path whose contents are not plain shapes. Each becomes one
+//! or a mask, any path painted with a pattern or with a `reflect`/`repeat`
+//! gradient that cannot be tiled out (radial with its focal point not inside
+//! its circle, or more than 256 tiles over the path), and any clip path whose contents are not plain shapes. Each becomes one
 //! [`Op::Raster`] — premultiplied RGBA pixels and the canvas rectangle they
 //! cover. The consumer picks the scale (device pixels per user unit) and
 //! re-flattens when it changes; that is the resolution policy, and it lives with
