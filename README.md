@@ -44,14 +44,16 @@ all draw what resvg would draw.
 
 ## What is vector, what is raster
 
-Vector, at every scale: fills and strokes with solid colour or pad-spread
-linear/radial gradients; dashes, caps, joins; group opacity and all sixteen
+Vector, at every scale: fills and strokes with solid colour or linear/radial
+gradients of any spread (a `reflect` or `repeat` gradient arrives as a pad
+gradient with its stops tiled over what it paints); dashes, caps, joins; group opacity and all sixteen
 blend modes; clip paths; embedded PNG/JPEG/GIF/WebP by their bytes; nested SVG
 `<image>`s by recursion; text, as glyph outlines.
 
 Raster, through resvg at `rasterScale` device pixels per user unit: groups
-with a filter or a mask, paths painted with a pattern or a `reflect`/`repeat`
-gradient, and clip paths whose contents aren't plain shapes. Each is one
+with a filter or a mask, paths painted with a pattern or with a `reflect`/`repeat`
+gradient that cannot be tiled out (radial with its focal point outside its
+circle, or more than 256 tiles), and clip paths whose contents aren't plain shapes. Each is one
 `Raster` op in canvas coordinates. `SVGPicture` re-flattens when the scale
 changes and caches otherwise. Vector masks and pattern paint are the next
 candidates — see [`docs/tasks/`](docs/tasks/tasks.md).

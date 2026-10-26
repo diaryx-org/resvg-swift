@@ -1,6 +1,7 @@
 //! The escape hatch: one node as resvg paints it.
 //!
-//! Filters, masks, pattern paint, and repeating gradients have no vector form in
+//! Filters, masks, pattern paint, and the few repeating gradients that cannot be
+//! tiled out have no vector form in
 //! the display list (yet — masks and patterns are candidates, see
 //! `docs/tasks/`). Rather than drop them or approximate, the flattener hands
 //! the whole node to resvg at the consumer's scale and emits the pixels as one
